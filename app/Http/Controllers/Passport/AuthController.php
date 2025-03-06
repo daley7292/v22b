@@ -7,7 +7,9 @@ use App\Http\Requests\Passport\AuthRegister;
 use App\Http\Requests\Passport\AuthForget;
 use App\Http\Requests\Passport\AuthLogin;
 use App\Jobs\SendEmailJob;
+use App\Models\Order;
 use App\Services\AuthService;
+use App\Services\OrderService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use App\Models\Plan;
@@ -75,6 +77,10 @@ class AuthController extends Controller
 
     public function register(AuthRegister $request)
     {
+
+
+
+
         if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
             $registerCountByIP = Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip())) ?? 0;
             if ((int)$registerCountByIP >= (int)config('v2board.register_limit_count', 3)) {
@@ -120,6 +126,7 @@ class AuthController extends Controller
                 abort(500, __('Incorrect email verification code'));
             }
         }
+
         $email = $request->input('email');
         $password = $request->input('password');
         $exist = User::where('email', $email)->first();
@@ -179,6 +186,38 @@ class AuthController extends Controller
         }
 
         $authService = new AuthService($user);
+
+        //新增邀请判断 这里写赠送套餐逻辑 这里处理邀请着套餐赠送问题
+        if (!(int)config('v2board.invite_force_present', 0)) {
+            $plan = Plan::find($request->input((int)config('v2board.complimentary_packages')));
+            //$user->invite_user_id;
+                if ($plan) {
+                    DB::beginTransaction();
+                    $order = new Order();
+                    $orderService = new OrderService($order);
+                    $order->user_id = $user->invite_user_id;
+                    $order->plan_id = $plan->id;
+                    $order->period = 'month_price';
+                    $order->trade_no = Helper::guid();
+                    $order->total_amount = 0;
+
+                    if ($order->period === 'reset_price') {
+                        $order->type = 4;
+                    } else if ($user->plan_id !== NULL && $order->plan_id !== $user->plan_id) {
+                        $order->type = 3;
+                    } else if ($user->expired_at > time() && $order->plan_id == $user->plan_id) {
+                        $order->type = 2;
+                    } else {
+                        $order->type = 1;
+                    }
+                    $orderService->setInvite($user);
+                    if (!$order->save()) {
+                        DB::rollback();
+                    }
+                    DB::commit();
+                }
+
+        }
 
         return response()->json([
             'data' => $authService->generateAuthData($request)
