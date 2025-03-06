@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Requests\Admin\ConfigSave;
 use App\Jobs\SendEmailJob;
+use App\Services\ServerService;
 use App\Services\TelegramService;
 use Illuminate\Http\Request;
 use App\Utils\Dict;
@@ -82,7 +83,10 @@ class ConfigController extends Controller
                 'commission_distribution_enable' => config('v2board.commission_distribution_enable', 0),
                 'commission_distribution_l1' => config('v2board.commission_distribution_l1'),
                 'commission_distribution_l2' => config('v2board.commission_distribution_l2'),
-                'commission_distribution_l3' => config('v2board.commission_distribution_l3')
+                'commission_distribution_l3' => config('v2board.commission_distribution_l3'),
+                // 下面是新增的功能
+                'invite_force_present' => (int)config('v2board.invite_force_present', 0),  //用户邀请注册赠送功能是否开启
+                'complimentary_packages' => (int)config('v2board.complimentary_packages', 0),  //邀请用户购买可选择赠送的套餐  传入套餐ID
             ],
             'site' => [
                 'logo' => config('v2board.logo'),
@@ -159,6 +163,12 @@ class ConfigController extends Controller
                 'password_limit_expire' => config('v2board.password_limit_expire', 60)
             ]
         ];
+
+        $serverService = new ServerService();
+        $servers = $serverService->getAllServers();
+        $data['invite']['servers']=$servers;
+
+
         if ($key && isset($data[$key])) {
             return response([
                 'data' => [
