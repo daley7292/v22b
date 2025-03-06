@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Requests\Admin\ConfigSave;
 use App\Jobs\SendEmailJob;
-use App\Services\ServerService;
+use App\Models\Plan;
 use App\Services\TelegramService;
 use Illuminate\Http\Request;
 use App\Utils\Dict;
@@ -164,10 +164,9 @@ class ConfigController extends Controller
             ]
         ];
 
-        $serverService = new ServerService();
-        $servers = $serverService->getAllServers();
-        $data['invite']['servers']=$servers;
 
+        $plans = Plan::orderBy('sort', 'ASC')->get();
+        $data['invite']['plans']=$plans;
 
         if ($key && isset($data[$key])) {
             return response([
