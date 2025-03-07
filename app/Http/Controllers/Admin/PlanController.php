@@ -38,6 +38,7 @@ class PlanController extends Controller
             if (!$plan) {
                 abort(500, '该订阅不存在');
             }
+
             DB::beginTransaction();
             // update user group id and transfer
             try {

@@ -12,6 +12,7 @@ use App\Services\AuthService;
 use App\Services\OrderService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use App\Models\Plan;
 use App\Models\User;
 use App\Models\InviteCode;
@@ -19,6 +20,8 @@ use App\Utils\Helper;
 use App\Utils\Dict;
 use App\Utils\CacheKey;
 use ReCaptcha\ReCaptcha;
+
+
 
 class AuthController extends Controller
 {
@@ -77,9 +80,6 @@ class AuthController extends Controller
 
     public function register(AuthRegister $request)
     {
-
-
-
 
         if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
             $registerCountByIP = Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip())) ?? 0;
@@ -188,11 +188,15 @@ class AuthController extends Controller
         $authService = new AuthService($user);
 
         //新增邀请判断 这里写赠送套餐逻辑 这里处理邀请着套餐赠送问题
-        if (!(int)config('v2board.invite_force_present', 0)) {
-            $plan = Plan::find($request->input((int)config('v2board.complimentary_packages')));
+        if ((int)config('v2board.invite_force_present')==1) {
+            $plan = Plan::find((int)config('v2board.complimentary_packages'));
+
             //$user->invite_user_id;
-                if ($plan) {
-                    // 判断用户是否以及有套餐
+            if ($plan) {
+                // 判断用户是否以及有套餐
+                //获取全局试用套餐和用户是否一致，不一致则出发赠送条件
+                $user_data=User::where('id', $user->invite_user_id)->first();
+                if((int)config('v2board.try_out_plan_id')!=$user_data->plan_id){
                     DB::beginTransaction();
                     $order = new Order();
                     $orderService = new OrderService($order);
@@ -201,22 +205,50 @@ class AuthController extends Controller
                     $order->period = 'month_price';
                     $order->trade_no = Helper::guid();
                     $order->total_amount = 0;
-
-                    if ($order->period === 'reset_price') {
-                        $order->type = 4;
-                    } else if ($user->plan_id !== NULL && $order->plan_id !== $user->plan_id) {
-                        $order->type = 3;
-                    } else if ($user->expired_at > time() && $order->plan_id == $user->plan_id) {
-                        $order->type = 2;
-                    } else {
-                        $order->type = 1;
-                    }
+                    $order->status=3;
+                    $order->type=6;
                     $orderService->setInvite($user);
                     if (!$order->save()) {
+
                         DB::rollback();
                     }
                     DB::commit();
-                }
+                    $expired_at = $user_data->expired_at;    //当前上游客户的到期时间
+                    $Plan1= Plan::find($user_data->plan_id); //获取上游用户当前的套餐
+                    $new_Plan =Plan::find((int)config('v2board.complimentary_packages'));//准备赠送套餐详细信息
+                    $complimentaryHours = (int)config('v2board.complimentary_package_duration'); // 额外定义的赠送小时数
+                    if ($Plan1 && $new_Plan) {
+                        // 确保当前套餐和赠送套餐的价格大于零
+                        if ($Plan1->month_price > 0 && $new_Plan->month_price > 0) {
+                            // 假设一个月有720小时（30天 * 24小时）
+                            $hoursInMonth = 720;
+
+                            // 计算当前套餐的每小时价格
+                            $currentHourlyPrice = $Plan1->month_price / $hoursInMonth;
+
+                            // 计算赠送套餐的每小时价格
+                            $complimentaryHourlyPrice = $new_Plan->month_price / $hoursInMonth;
+
+                            // 计算赠送套餐在当前套餐价格下的等效小时数
+                            $equivalentComplimentaryHours = $complimentaryHourlyPrice / $currentHourlyPrice * $hoursInMonth;
+
+                            // 获取当前时间戳
+                            $currentTimestamp = time();
+
+                            // 计算当前套餐的剩余小时数
+                            $remainingHours = floor(($expired_at - $currentTimestamp) / 3600);
+
+                            // 如果您想直接使用配置中定义的赠送小时数，则使用下面的代码替换上面的计算
+                            $totalHours = $remainingHours + $complimentaryHours;
+
+                            // 更新用户的到期时间
+                            $newExpirationTimestamp = $currentTimestamp + floor($totalHours * 3600);
+                            $user_data->expired_at = $newExpirationTimestamp;
+                            $user_data->save();
+                        }
+                    }
+
+            }
 
         }
 
