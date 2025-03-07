@@ -29,7 +29,11 @@ class PlanSave extends FormRequest
             'reset_traffic_method' => 'nullable|integer|in:0,1,2,3,4',
             'capacity_limit' => 'nullable|integer',
             'speed_limit' => 'nullable|integer',
-            'ip_limit' => 'nullable|integer'
+            'ip_limit' => 'nullable|integer',
+
+            'block_ipv4_cont'=>'nullable|integer',
+            'block_plant_cont'=>'nullable|integer',
+
         ];
     }
 
