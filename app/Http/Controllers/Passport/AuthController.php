@@ -216,10 +216,10 @@ class AuthController extends Controller
                     $expired_at = $user_data->expired_at;    //当前上游客户的到期时间
                     $Plan1= Plan::find($user_data->plan_id); //获取上游用户当前的套餐
                     $new_Plan =Plan::find((int)config('v2board.complimentary_packages'));//准备赠送套餐详细信息
-                    $complimentaryHours = (int)config('v2board.complimentary_package_duration'); // 额外定义的赠送小时数
                     if ($Plan1 && $new_Plan) {
                         // 确保当前套餐和赠送套餐的价格大于零
                         if ($Plan1->month_price > 0 && $new_Plan->month_price > 0) {
+
                             // 假设一个月有720小时（30天 * 24小时）
                             $hoursInMonth = 720;
 
@@ -232,14 +232,20 @@ class AuthController extends Controller
                             // 计算赠送套餐在当前套餐价格下的等效小时数
                             $equivalentComplimentaryHours = $complimentaryHourlyPrice / $currentHourlyPrice * $hoursInMonth;
 
+                            // 获取配置项中的额外赠送小时数
+                            $configComplimentaryHours = (int)config('v2board.complimentary_package_duration');
+
+                            // 计算总的赠送小时数
+                            $totalComplimentaryHours = $equivalentComplimentaryHours + $configComplimentaryHours;
+
                             // 获取当前时间戳
                             $currentTimestamp = time();
 
                             // 计算当前套餐的剩余小时数
                             $remainingHours = floor(($expired_at - $currentTimestamp) / 3600);
 
-                            // 如果您想直接使用配置中定义的赠送小时数，则使用下面的代码替换上面的计算
-                            $totalHours = $remainingHours + $complimentaryHours;
+                            // 计算总小时数
+                            $totalHours = $remainingHours + $totalComplimentaryHours;
 
                             // 更新用户的到期时间
                             $newExpirationTimestamp = $currentTimestamp + floor($totalHours * 3600);
