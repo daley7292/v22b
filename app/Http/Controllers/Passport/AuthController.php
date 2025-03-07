@@ -223,11 +223,11 @@ class AuthController extends Controller
                             // 假设一个月有720小时（30天 * 24小时）
                             $hoursInMonth = 720;
 
-                            // 计算当前套餐的每小时价格
-                            $currentHourlyPrice = $Plan1->month_price / $hoursInMonth;
+                            // 计算当前套餐的每小时价格（分转换为元）
+                            $currentHourlyPrice = ($Plan1->month_price / 100) / $hoursInMonth;
 
-                            // 计算赠送套餐的每小时价格
-                            $complimentaryHourlyPrice = $new_Plan->month_price / $hoursInMonth;
+                            // 计算赠送套餐的每小时价格（分转换为元）
+                            $complimentaryHourlyPrice = ($new_Plan->month_price / 100) / $hoursInMonth;
 
                             // 计算赠送套餐在当前套餐价格下的等效小时数
                             $equivalentComplimentaryHours = $complimentaryHourlyPrice / $currentHourlyPrice * $hoursInMonth;
