@@ -192,6 +192,7 @@ class AuthController extends Controller
             $plan = Plan::find($request->input((int)config('v2board.complimentary_packages')));
             //$user->invite_user_id;
                 if ($plan) {
+                    // 判断用户是否以及有套餐
                     DB::beginTransaction();
                     $order = new Order();
                     $orderService = new OrderService($order);
