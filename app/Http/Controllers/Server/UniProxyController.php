@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Server;
 
+use App\Models\Plan;
 use App\Models\User;
 use App\Services\ServerService;
 use App\Services\StatisticalService;
@@ -48,12 +49,36 @@ class UniProxyController extends Controller
         $users = $users->toArray();
 
         $response['users'] = $users;
-
         // 在这里获取用户信息的时候通过User拿到当前计划，然后通过计划下发限制
-        $plan=User::find($users['id']);
-        $plan_data=Plan::find($plan->plan_id);
-        $response['block_ipv4_cont']= $plan_data->block_ipv4_cont;
-        $response['block_plant_cont']= $plan_data->block_plant_cont;
+        $usersArray=$users;
+        $modifiedUsers = [];
+        foreach ($usersArray as $user_info) {
+            // 使用 User::find($user['id']) 获取用户对象
+            $userObject = User::find($user_info['id']);
+
+            if ($userObject['plan_id']) {
+                // 获取 block_ipv4_cont 和 block_plant_cont 字段的值
+                $plan_data=Plan::find($userObject['plan_id']);
+                $blockIpv4Cont = $plan_data->block_ipv4_cont;
+                $blockPlantCont = $plan_data->block_plant_cont;
+                // 将原数组中的数据与新获取的字段合并
+                $modifiedUser = [
+                    'id' => $user_info['id'],
+                    'uuid' => $user_info['uuid'],
+                    'speed_limit' => $user_info['speed_limit'],
+                    'ip_limit' => $user_info['ip_limit'],
+                    'block_ipv4_cont' => $blockIpv4Cont,
+                    'block_plant_cont' => $blockPlantCont
+                ];
+
+                // 将修改后的用户数据添加到新数组中
+                $modifiedUsers[] = $modifiedUser;
+            } else {
+                // 如果用户不存在，可以选择跳过或记录错误
+                $modifiedUsers[] = $user_info; // 这里直接保留原数组数据，或添加错误处理逻辑
+            }
+        }
+        $response['users'] =$modifiedUsers;
         //代码截至与此---------------------------------------------------
         $eTag = sha1(json_encode($response));
         if (strpos($request->header('If-None-Match'), $eTag) !== false ) {
