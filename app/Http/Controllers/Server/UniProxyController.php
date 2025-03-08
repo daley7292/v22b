@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Server;
 
+use App\Models\User;
 use App\Services\ServerService;
 use App\Services\StatisticalService;
 use App\Services\UserService;
@@ -48,6 +49,12 @@ class UniProxyController extends Controller
 
         $response['users'] = $users;
 
+        // 在这里获取用户信息的时候通过User拿到当前计划，然后通过计划下发限制
+        $plan=User::find($users['id']);
+        $plan_data=Plan::find($plan->plan_id);
+        $response['block_ipv4_cont']= $plan_data->block_ipv4_cont;
+        $response['block_plant_cont']= $plan_data->block_plant_cont;
+        //代码截至与此---------------------------------------------------
         $eTag = sha1(json_encode($response));
         if (strpos($request->header('If-None-Match'), $eTag) !== false ) {
             abort(304);
@@ -74,6 +81,7 @@ class UniProxyController extends Controller
     // 后端获取配置
     public function config(Request $request)
     {
+
         switch ($this->nodeType) {
             case 'shadowsocks':
                 $response = [
