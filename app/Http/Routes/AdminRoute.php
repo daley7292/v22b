@@ -95,6 +95,7 @@ class AdminRoute
             $router->get ('/stat/getStat', 'Admin\\StatController@getStat');
             $router->get ('/stat/getOverride', 'Admin\\StatController@getOverride');
             $router->get ('/stat/getServerLastRank', 'Admin\\StatController@getServerLastRank');
+            $router->get ('/stat/getFinances', 'Admin\\StatController@getFinances');
             $router->get ('/stat/getOrder', 'Admin\\StatController@getOrder');
             $router->get ('/stat/getStatUser', 'Admin\\StatController@getStatUser');
             $router->get ('/stat/getRanking', 'Admin\\StatController@getRanking');

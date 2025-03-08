@@ -409,7 +409,146 @@ class StatController extends Controller
             ]
         ];
     }
+/**
+ * 获取财务统计数据
+ * @param Request $request
+ * @return array
+ */
+public function getFinances(Request $request)
+{
+    // 验证请求参数
+    $request->validate([
+        'type' => 'required|in:week,half_month,month,quarter,half_year,year'
+    ]);
 
+    // 获取时间范围
+    $endTime = time();
+    $type = $request->input('type');
+    
+    // 将 match 替换为 switch
+    switch ($type) {
+        case 'week':
+            $startTime = strtotime('-1 week', $endTime);
+            $interval = '1 day';
+            break;
+        case 'half_month':
+            $startTime = strtotime('-15 days', $endTime);
+            $interval = '1 day';
+            break;
+        case 'month':
+            $startTime = strtotime('-1 month', $endTime);
+            $interval = '1 day';
+            break;
+        case 'quarter':
+            $startTime = strtotime('-3 months', $endTime);
+            $interval = '1 week';
+            break;
+        case 'half_year':
+            $startTime = strtotime('-6 months', $endTime);
+            $interval = '1 week';
+            break;
+        case 'year':
+            $startTime = strtotime('-1 year', $endTime);
+            $interval = '1 month';
+            break;
+        default:
+            $startTime = strtotime('-1 month', $endTime);
+            $interval = '1 day';
+    }
+
+    // 获取上一个周期的时间范围
+    $previousEndTime = $startTime;
+    $previousStartTime = $startTime - ($endTime - $startTime);
+
+    // 获取当前周期收入
+    $currentIncome = Order::where('created_at', '>=', $startTime)
+        ->where('created_at', '<=', $endTime)
+        ->where('status', 3)
+        ->sum('total_amount');
+
+    // 获取上一周期收入
+    $previousIncome = Order::where('created_at', '>=', $previousStartTime)
+        ->where('created_at', '<=', $previousEndTime)
+        ->where('status', 3)
+        ->sum('total_amount');
+
+    // 计算增长率
+    $growthRate = $previousIncome > 0 ? 
+        round((($currentIncome - $previousIncome) / $previousIncome) * 100, 2) : 0;
+
+    // 准备图表数据
+    $chartData = [];
+
+    // 生成时间点
+    $currentTime = $startTime;
+    while ($currentTime <= $endTime) {
+        $nextTime = strtotime("+{$interval}", $currentTime);
+        if ($nextTime > $endTime) {
+            $nextTime = $endTime;
+        }
+
+        // 获取该时间段的收入
+        $income = Order::where('created_at', '>=', $currentTime)
+            ->where('created_at', '<=', $nextTime)
+            ->where('status', 3)
+            ->sum('total_amount');
+
+        $chartData[] = [
+            'date' => date('Y-m-d', $currentTime),
+            'income' => $income / 100, // 转换为元
+            'type' => '收入'
+        ];
+
+        $currentTime = $nextTime;
+    }
+
+    // 获取各时间维度的统计数据
+    $monthIncome = Order::where('created_at', '>=', strtotime('-1 month', $endTime))
+        ->where('created_at', '<=', $endTime)
+        ->where('status', 3)
+        ->sum('total_amount');
+
+    $quarterIncome = Order::where('created_at', '>=', strtotime('-3 months', $endTime))
+        ->where('created_at', '<=', $endTime)
+        ->where('status', 3)
+        ->sum('total_amount');
+
+    $halfYearIncome = Order::where('created_at', '>=', strtotime('-6 months', $endTime))
+        ->where('created_at', '<=', $endTime)
+        ->where('status', 3)
+        ->sum('total_amount');
+
+    $yearIncome = Order::where('created_at', '>=', strtotime('-1 year', $endTime))
+        ->where('created_at', '<=', $endTime)
+        ->where('status', 3)
+        ->sum('total_amount');
+
+    return [
+        'data' => [
+            'current_period' => [
+                'start_date' => date('Y-m-d', $startTime),
+                'end_date' => date('Y-m-d', $endTime),
+                'income' => $currentIncome / 100,
+            ],
+            'previous_period' => [
+                'start_date' => date('Y-m-d', $previousStartTime),
+                'end_date' => date('Y-m-d', $previousEndTime),
+                'income' => $previousIncome / 100,
+            ],
+            'growth_rate' => $growthRate,
+            'growth_text' => $growthRate >= 0 ? 
+                "较上一周期增长{$growthRate}%" : 
+                "较上一周期下降" . abs($growthRate) . "%",
+            'total_statistics' => [
+                'month' => $monthIncome / 100,
+                'quarter' => $quarterIncome / 100,
+                'half_year' => $halfYearIncome / 100,
+                'year' => $yearIncome / 100,
+            ],
+            'chart_data' => $chartData
+        ]
+    ];
+}
     public function getServerLastRank()
     {
         $servers = [
