@@ -195,8 +195,8 @@ class AuthController extends Controller
             if ($plan) {
                 // 判断用户是否以及有套餐
                 //获取全局试用套餐和用户是否一致，不一致则出发赠送条件
-                $user_data=User::where('id', $user->invite_user_id)->first();
-                if((int)config('v2board.try_out_plan_id')!=$user_data->plan_id){
+                $user_data = User::where('id', $user->invite_user_id)->first();
+                if ((int)config('v2board.try_out_plan_id') != $user_data->plan_id) {
                     DB::beginTransaction();
                     $order = new Order();
                     $orderService = new OrderService($order);
@@ -205,8 +205,8 @@ class AuthController extends Controller
                     $order->period = 'month_price';
                     $order->trade_no = Helper::guid();
                     $order->total_amount = 0;
-                    $order->status=3;
-                    $order->type=6;
+                    $order->status = 3;
+                    $order->type = 6;
                     $orderService->setInvite($user);
                     if (!$order->save()) {
 
@@ -214,8 +214,8 @@ class AuthController extends Controller
                     }
                     DB::commit();
                     $expired_at = $user_data->expired_at;    //当前上游客户的到期时间
-                    $Plan1= Plan::find($user_data->plan_id); //获取上游用户当前的套餐
-                    $new_Plan =Plan::find((int)config('v2board.complimentary_packages'));//准备赠送套餐详细信息
+                    $Plan1 = Plan::find($user_data->plan_id); //获取上游用户当前的套餐
+                    $new_Plan = Plan::find((int)config('v2board.complimentary_packages'));//准备赠送套餐详细信息
                     if ($Plan1 && $new_Plan) {
                         // 确保当前套餐和赠送套餐的价格大于零
                         if ($Plan1->month_price > 0 && $new_Plan->month_price > 0) {
@@ -254,10 +254,10 @@ class AuthController extends Controller
                         }
                     }
 
+                }
+
             }
-
         }
-
         return response()->json([
             'data' => $authService->generateAuthData($request)
         ]);
