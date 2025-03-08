@@ -130,6 +130,109 @@ class StatController extends Controller
 
     public function getOrder(Request $request)
     {
+                    // 计算本周和上周的时间范围
+                    $thisWeekStart = strtotime('monday this week');
+                    $thisWeekEnd = time();
+                    $lastWeekStart = strtotime('monday last week');
+                    $lastWeekEnd = strtotime('sunday last week');
+            
+                    // 获取本周和上周的新购数据
+                    $thisWeekNewPurchase = Order::where('created_at', '>=', $thisWeekStart)
+                        ->where('created_at', '<=', $thisWeekEnd)
+                        ->where('type', 1)
+                        ->where('status', 3)
+                        ->count();
+            
+                    $lastWeekNewPurchase = Order::where('created_at', '>=', $lastWeekStart)
+                        ->where('created_at', '<=', $lastWeekEnd)
+                        ->where('type', 1)
+                        ->where('status', 3)
+                        ->count();
+            
+                    // 获取本周和上周的续费数据
+                    $thisWeekRenew = Order::where('created_at', '>=', $thisWeekStart)
+                        ->where('created_at', '<=', $thisWeekEnd)
+                        ->where('type', 2)
+                        ->where('status', 3)
+                        ->count();
+            
+                    $lastWeekRenew = Order::where('created_at', '>=', $lastWeekStart)
+                        ->where('created_at', '<=', $lastWeekEnd)
+                        ->where('type', 2)
+                        ->where('status', 3)
+                        ->count();
+            
+                    // 计算增长率和流失率
+                    $newPurchaseRate = $lastWeekNewPurchase > 0 ? 
+                        round(($thisWeekNewPurchase / $lastWeekNewPurchase) * 100, 2) : 0;
+                    $renewRate = $lastWeekRenew > 0 ? 
+                        round(($thisWeekRenew / $lastWeekRenew) * 100, 2) : 0;
+            
+                    // 获取每日数据用于图表展示
+                    $chartData = [];    
+            
+                    // 获取上周每日数据
+                for ($i = 0; $i < 7; $i++) {
+                    $dayStart = $lastWeekStart + ($i * 86400);
+                    $dayEnd = $dayStart + 86399;
+                    $date = date('m-d', $dayStart);
+                    
+                    $dayNewPurchase = Order::where('created_at', '>=', $dayStart)
+                        ->where('created_at', '<=', $dayEnd)
+                        ->where('type', 1)
+                        ->where('status', 3)
+                        ->count();
+                        
+                    $dayRenew = Order::where('created_at', '>=', $dayStart)
+                        ->where('created_at', '<=', $dayEnd)
+                        ->where('type', 2)
+                        ->where('status', 3)
+                        ->count();
+                        
+                    $chartData[] = [
+                        'date' => $date,
+                        'type' => '上周新购',
+                        'value' => $dayNewPurchase
+                    ];
+                    $chartData[] = [
+                        'date' => $date,
+                        'type' => '上周续费',
+                        'value' => $dayRenew
+                    ];
+                }
+                
+                // 获取本周每日数据
+                for ($i = 0; $i < 7; $i++) {
+                    $dayStart = $thisWeekStart + ($i * 86400);
+                    if ($dayStart > time()) break;
+                    
+                    $dayEnd = min($dayStart + 86399, time());
+                    $date = date('m-d', $dayStart);
+                    
+                    $dayNewPurchase = Order::where('created_at', '>=', $dayStart)
+                        ->where('created_at', '<=', $dayEnd)
+                        ->where('type', 1)
+                        ->where('status', 3)
+                        ->count();
+                        
+                    $dayRenew = Order::where('created_at', '>=', $dayStart)
+                        ->where('created_at', '<=', $dayEnd)
+                        ->where('type', 2)
+                        ->where('status', 3)
+                        ->count();
+                        
+                    $chartData[] = [
+                        'date' => $date,
+                        'type' => '本周新购',
+                        'value' => $dayNewPurchase
+                    ];
+                    $chartData[] = [
+                        'date' => $date,
+                        'type' => '本周续费',
+                        'value' => $dayRenew
+                    ];
+                }
+        
         $statistics = Stat::where('record_type', 'd')
             ->limit(31)
             ->orderBy('record_at', 'DESC')
@@ -158,10 +261,152 @@ class StatController extends Controller
                 'date' => $date,
                 'value' => $statistic['commission_count']
             ];
+
+                // 获取当天的开始和结束时间
+                $dayStart = strtotime(date('Y-m-d', $statistic['record_at']));
+                $dayEnd = $dayStart + 86399;
+
+                // 获取新购数据
+                $newPurchaseDay = Order::where('created_at', '>=', $dayStart)
+                    ->where('created_at', '<=', $dayEnd)
+                    ->where('type', 1)
+                    ->where('status', 3)
+                    ->count();
+
+                // 获取续费数据
+                $renewDay = Order::where('created_at', '>=', $dayStart)
+                    ->where('created_at', '<=', $dayEnd)
+                    ->where('type', 2)
+                    ->where('status', 3)
+                    ->count();
+
+                // 添加日数据
+                $result[] = [
+                    'type' => '日新购',
+                    'date' => $date,
+                    'value' => $newPurchaseDay
+                ];
+                $result[] = [
+                    'type' => '日续费',
+                    'date' => $date,
+                    'value' => $renewDay
+                ];
+
+                // 获取周数据（过去7天）
+                $weekStart = $dayStart - 86400 * 6;
+                $newPurchaseWeek = Order::where('created_at', '>=', $weekStart)
+                    ->where('created_at', '<=', $dayEnd)
+                    ->where('type', 1)
+                    ->where('status', 3)
+                    ->count();
+                $renewWeek = Order::where('created_at', '>=', $weekStart)
+                    ->where('created_at', '<=', $dayEnd)
+                    ->where('type', 2)
+                    ->where('status', 3)
+                    ->count();
+
+                // 获取月数据
+                $monthStart = strtotime(date('Y-m-01', $statistic['record_at']));
+                $newPurchaseMonth = Order::where('created_at', '>=', $monthStart)
+                    ->where('created_at', '<=', $dayEnd)
+                    ->where('type', 1)
+                    ->where('status', 3)
+                    ->count();
+                $renewMonth = Order::where('created_at', '>=', $monthStart)
+                    ->where('created_at', '<=', $dayEnd)
+                    ->where('type', 2)
+                    ->where('status', 3)
+                    ->count();
+
+                // 获取半年数据
+                $halfYearStart = strtotime('-6 months', $dayStart);
+                $newPurchaseHalfYear = Order::where('created_at', '>=', $halfYearStart)
+                    ->where('created_at', '<=', $dayEnd)
+                    ->where('type', 1)
+                    ->where('status', 3)
+                    ->count();
+                $renewHalfYear = Order::where('created_at', '>=', $halfYearStart)
+                    ->where('created_at', '<=', $dayEnd)
+                    ->where('type', 2)
+                    ->where('status', 3)
+                    ->count();
+
+                // 获取年数据
+                $yearStart = strtotime('-1 year', $dayStart);
+                $newPurchaseYear = Order::where('created_at', '>=', $yearStart)
+                    ->where('created_at', '<=', $dayEnd)
+                    ->where('type', 1)
+                    ->where('status', 3)
+                    ->count();
+                $renewYear = Order::where('created_at', '>=', $yearStart)
+                    ->where('created_at', '<=', $dayEnd)
+                    ->where('type', 2)
+                    ->where('status', 3)
+                    ->count();
+
+                // 添加周、月、半年、年数据
+                $result[] = [
+                    'type' => '周新购',
+                    'date' => $date,
+                    'value' => $newPurchaseWeek
+                ];
+                $result[] = [
+                    'type' => '周续费',
+                    'date' => $date,
+                    'value' => $renewWeek
+                ];
+                $result[] = [
+                    'type' => '月新购',
+                    'date' => $date,
+                    'value' => $newPurchaseMonth
+                ];
+                $result[] = [
+                    'type' => '月续费',
+                    'date' => $date,
+                    'value' => $renewMonth
+                ];
+                $result[] = [
+                    'type' => '半年新购',
+                    'date' => $date,
+                    'value' => $newPurchaseHalfYear
+                ];
+                $result[] = [
+                    'type' => '半年续费',
+                    'date' => $date,
+                    'value' => $renewHalfYear
+                ];
+                $result[] = [
+                    'type' => '年新购',
+                    'date' => $date,
+                    'value' => $newPurchaseYear
+                ];
+                $result[] = [
+                    'type' => '年续费',
+                    'date' => $date,
+                    'value' => $renewYear
+                ];
         }
+
         $result = array_reverse($result);
         return [
-            'data' => $result
+            'data' => [
+                'statistics' => $result,
+                'comparison' => [
+                    'new_purchase' => [
+                        'this_week' => $thisWeekNewPurchase,
+                        'last_week' => $lastWeekNewPurchase,
+                        'growth_rate' => $newPurchaseRate,
+                        'growth_text' => "当前新购率是上周的{$newPurchaseRate}%"
+                    ],
+                    'renew' => [
+                        'this_week' => $thisWeekRenew,
+                        'last_week' => $lastWeekRenew,
+                        'churn_rate' => $renewRate,
+                        'churn_text' => "当前用户流失率是上周的{$renewRate}%"
+                    ]
+                ],
+                'chart_data' => $chartData
+            ]
         ];
     }
 
