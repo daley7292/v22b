@@ -416,91 +416,57 @@ class StatController extends Controller
  */
 public function getFinances(Request $request)
 {
-    // 验证请求参数
+    // 1. 请求参数验证
     $request->validate([
         'start_date' => 'required|date',
-        'end_date' => 'required|date|after_or_equal:start_date'
+        'end_date' => 'required|date|after_or_equal:start_date',
+        'user_id' => 'nullable|integer'
     ]);
 
-    // 规范时间获取
+    // 2. 时间处理
     $endTime = strtotime($request->input('end_date') . ' 23:59:59');
     $startTime = strtotime($request->input('start_date') . ' 00:00:00');
-
-    // 计算周期天数
     $periodDays = ceil(($endTime - $startTime) / 86400);
 
-    // 一次性获取所有时间段的数据
-    $data = Order::selectRaw('
-            DATE_FORMAT(created_at, "%Y-%m-%d") as date,
-            SUM(total_amount) as total_amount
-        ')
-        ->where('created_at', '>=', $startTime)
-        ->where('created_at', '<=', $endTime)
-        ->where('status', 3)
-        ->groupBy('date')
-        ->orderBy('date', 'asc')
-        ->get();
+    // 3. 基础查询构建
+    $baseQuery = Order::query()->where('status', 3);
+    
+    // 4. 用户数据查询（新增功能）
+    $userStats = null;
+    if ($request->filled('user_id')) {
+        $userId = $request->input('user_id');
+        $userStats = $this->getUserStatistics($userId);
+        
+        // 修改基础查询，加入用户条件
+        $baseQuery->where(function($query) use ($userId) {
+            $query->where('user_id', $userId)
+                ->orWhere('invite_user_id', $userId);
+        });
+    }
 
-    // 获取各时期收入
+    // 5. 保留原有的时期数据查询
+    $data = $this->getPeriodData($baseQuery, $startTime, $endTime);
+    
+    // 6. 获取环比数据
+    $previousData = $this->getPreviousPeriodData($startTime, $endTime);
+    
+    // 7. 获取同比数据
+    $lastYearData = $this->getLastYearPeriodData($startTime, $endTime);
+    
+    // 8. 计算各项指标
     $currentIncome = $data->sum('total_amount');
-
-    // 计算环比周期的时间范围（上一个相同时间长度）
-    $previousStartTime = $startTime - ($endTime - $startTime);
-    $previousEndTime = $previousStartTime + ($endTime - $startTime) - 1;
-
-    // 获取环比周期收入
-    $previousData = Order::selectRaw('
-            DATE_FORMAT(created_at, "%Y-%m-%d") as date,
-            SUM(total_amount) as total_amount
-        ')
-        ->where('created_at', '>=', $previousStartTime)
-        ->where('created_at', '<=', $previousEndTime)
-        ->where('status', 3)
-        ->groupBy('date')
-        ->orderBy('date', 'asc')
-        ->get();
-
     $previousIncome = $previousData->sum('total_amount');
-
-    // 计算同比周期的时间范围（去年同期）
-    $lastYearStartTime = strtotime('-1 year', $startTime);
-    $lastYearEndTime = strtotime('-1 year', $endTime);
-
-    // 获取同比周期收入
-    $lastYearData = Order::selectRaw('
-            DATE_FORMAT(created_at, "%Y-%m-%d") as date,
-            SUM(total_amount) as total_amount
-        ')
-        ->where('created_at', '>=', $lastYearStartTime)
-        ->where('created_at', '<=', $lastYearEndTime)
-        ->where('status', 3)
-        ->groupBy('date')
-        ->orderBy('date', 'asc')
-        ->get();
-
     $lastYearIncome = $lastYearData->sum('total_amount');
+    
+    // 9. 准备图表数据
+    $chartData = $this->prepareChartData($data, $previousData, $lastYearData, $startTime, $endTime);
+    
+    // 10. 计算增长率
+    $yearOnYear = $this->calculateGrowthRate($currentIncome, $lastYearIncome);
+    $chainRatio = $this->calculateGrowthRate($currentIncome, $previousIncome);
 
-    // 准备图表数据
-    $chartData = $data->map(function ($item) use ($previousData, $lastYearData, $startTime, $endTime) {  // 添加 $startTime, $endTime
-        $previousDay = $previousData->firstWhere('date', date('Y-m-d', strtotime($item->date) - ($endTime - $startTime)));  // 修改时间计算方式
-        $lastYearDay = $lastYearData->firstWhere('date', date('Y-m-d', strtotime('-1 year', strtotime($item->date))));
-
-        return [
-            'date' => $item->date,
-            'current' => $item->total_amount / 100,
-            'previous' => $previousDay ? $previousDay->total_amount / 100 : 0,
-            'lastYear' => $lastYearDay ? $lastYearDay->total_amount / 100 : 0,
-        ];
-    })->all();
-
-    // 计算增长率
-    $yearOnYear = $lastYearIncome > 0 ?
-        round((($currentIncome - $lastYearIncome) / $lastYearIncome) * 100, 2) : 0;
-
-    $chainRatio = $previousIncome > 0 ?
-        round((($currentIncome - $previousIncome) / $previousIncome) * 100, 2) : 0;
-
-    return [
+    // 11. 构建响应数据
+    $response = [
         'data' => [
             'current_period' => [
                 'start_date' => date('Y-m-d', $startTime),
@@ -509,28 +475,91 @@ public function getFinances(Request $request)
                 'days' => $periodDays
             ],
             'previous_period' => [
-                'start_date' => date('Y-m-d', $previousStartTime),
-                'end_date' => date('Y-m-d', $previousEndTime),
+                'start_date' => date('Y-m-d', $startTime - ($endTime - $startTime)),
                 'income' => $previousIncome / 100
             ],
             'last_year_period' => [
-                'start_date' => date('Y-m-d', $lastYearStartTime),
-                'end_date' => date('Y-m-d', $lastYearEndTime),
+                'start_date' => date('Y-m-d', strtotime('-1 year', $startTime)),
+                'end_date' => date('Y-m-d', strtotime('-1 year', $endTime)),
                 'income' => $lastYearIncome / 100
             ],
             'comparison' => [
                 'chain_ratio' => $chainRatio,
-                'chain_text' => $chainRatio >= 0 ?
-                    "环比增长{$chainRatio}%" :
+                'chain_text' => $chainRatio >= 0 ? 
+                    "环比增长{$chainRatio}%" : 
                     "环比下降" . abs($chainRatio) . "%",
                 'year_on_year' => $yearOnYear,
-                'year_text' => $yearOnYear >= 0 ?
-                    "同比增长{$yearOnYear}%" :
+                'year_text' => $yearOnYear >= 0 ? 
+                    "同比增长{$yearOnYear}%" : 
                     "同比下降" . abs($yearOnYear) . "%"
             ],
             'chart_data' => $chartData
         ]
     ];
+
+    // 12. 添加用户统计数据（如果有）
+    if ($userStats) {
+        $response['data']['user_statistics'] = $userStats;
+    }
+
+    return $response;
+}
+
+// 新增辅助方法
+private function getUserStatistics($userId)
+{
+    $now = time();
+    $ranges = [
+        'week' => [strtotime('-1 week', $now), $now],
+        'month' => [strtotime('-1 month', $now), $now],
+        'quarter' => [strtotime('-3 month', $now), $now],
+        'half_year' => [strtotime('-6 month', $now), $now],
+        'year' => [strtotime('-1 year', $now), $now]
+    ];
+
+    $userStats = [
+        'user_info' => User::select(['id', 'email', 'commission_rate', 'commission_balance'])
+            ->where('id', $userId)
+            ->first(),
+        'periods' => []
+    ];
+
+    foreach ($ranges as $period => $range) {
+        $userStats['periods'][$period] = [
+            'invited_users' => User::where('invite_user_id', $userId)
+                ->whereBetween('created_at', $range)
+                ->count(),
+            'new_purchase' => Order::where(function($query) use ($userId) {
+                $query->where('user_id', $userId)
+                    ->orWhere('invite_user_id', $userId);
+            })
+            ->where('type', 1)
+            ->where('status', 3)
+            ->whereBetween('created_at', $range)
+            ->count(),
+            'renew' => Order::where(function($query) use ($userId) {
+                $query->where('user_id', $userId)
+                    ->orWhere('invite_user_id', $userId);
+            })
+            ->where('type', 2)
+            ->where('status', 3)
+            ->whereBetween('created_at', $range)
+            ->count(),
+            'total_amount' => Order::where(function($query) use ($userId) {
+                $query->where('user_id', $userId)
+                    ->orWhere('invite_user_id', $userId);
+            })
+            ->where('status', 3)
+            ->whereBetween('created_at', $range)
+            ->sum('total_amount') / 100,
+            'commission_amount' => Order::where('invite_user_id', $userId)
+                ->where('status', 3)
+                ->whereBetween('created_at', $range)
+                ->sum('commission_balance') / 100
+        ];
+    }
+
+    return $userStats;
 }
 
     public function getServerLastRank()
@@ -588,6 +617,113 @@ public function getFinances(Request $request)
             'total' => $total
         ];
     }
+
+
+
+    /**
+ * 获取指定时期的数据
+ * @param \Illuminate\Database\Eloquent\Builder $query
+ * @param int $startTime
+ * @param int $endTime
+ * @return \Illuminate\Support\Collection
+ */
+private function getPeriodData($query, $startTime, $endTime)
+{
+    return (clone $query)
+        ->selectRaw('DATE(FROM_UNIXTIME(created_at)) as date, SUM(total_amount) as total_amount')
+        ->where('created_at', '>=', $startTime)
+        ->where('created_at', '<=', $endTime)
+        ->groupBy('date')
+        ->orderBy('date')
+        ->get();
+}
+
+/**
+ * 获取环比时期的数据
+ * @param int $startTime
+ * @param int $endTime
+ * @return \Illuminate\Support\Collection
+ */
+private function getPreviousPeriodData($startTime, $endTime)
+{
+    $periodLength = $endTime - $startTime;
+    $previousStartTime = $startTime - $periodLength;
+    $previousEndTime = $endTime - $periodLength;
+    
+    return Order::where('status', 3)
+        ->selectRaw('DATE(FROM_UNIXTIME(created_at)) as date, SUM(total_amount) as total_amount')
+        ->where('created_at', '>=', $previousStartTime)
+        ->where('created_at', '<=', $previousEndTime)
+        ->groupBy('date')
+        ->orderBy('date')
+        ->get();
+}
+
+/**
+ * 获取同比时期的数据
+ * @param int $startTime
+ * @param int $endTime
+ * @return \Illuminate\Support\Collection
+ */
+private function getLastYearPeriodData($startTime, $endTime)
+{
+    $lastYearStartTime = strtotime('-1 year', $startTime);
+    $lastYearEndTime = strtotime('-1 year', $endTime);
+    
+    return Order::where('status', 3)
+        ->selectRaw('DATE(FROM_UNIXTIME(created_at)) as date, SUM(total_amount) as total_amount')
+        ->where('created_at', '>=', $lastYearStartTime)
+        ->where('created_at', '<=', $lastYearEndTime)
+        ->groupBy('date')
+        ->orderBy('date')
+        ->get();
+}
+
+/**
+ * 准备图表数据
+ * @param \Illuminate\Support\Collection $currentData
+ * @param \Illuminate\Support\Collection $previousData
+ * @param \Illuminate\Support\Collection $lastYearData
+ * @param int $startTime
+ * @param int $endTime
+ * @return array
+ */
+private function prepareChartData($currentData, $previousData, $lastYearData, $startTime, $endTime)
+{
+    $chartData = [];
+    $current = $startTime;
+    
+    while ($current <= $endTime) {
+        $date = date('Y-m-d', $current);
+        $previousDate = date('Y-m-d', $current - ($endTime - $startTime));
+        $lastYearDate = date('Y-m-d', strtotime('-1 year', $current));
+        
+        $chartData[] = [
+            'date' => $date,
+            'current' => ($currentData->firstWhere('date', $date)->total_amount ?? 0) / 100,
+            'previous' => ($previousData->firstWhere('date', $previousDate)->total_amount ?? 0) / 100,
+            'lastYear' => ($lastYearData->firstWhere('date', $lastYearDate)->total_amount ?? 0) / 100
+        ];
+        
+        $current = strtotime('+1 day', $current);
+    }
+    
+    return $chartData;
+}
+
+/**
+ * 计算增长率
+ * @param float $current
+ * @param float $previous
+ * @return float
+ */
+private function calculateGrowthRate($current, $previous)
+{
+    if ($previous == 0) {
+        return $current > 0 ? 100 : 0;
+    }
+    return round(($current - $previous) / $previous * 100, 2);
+}
 
 }
 
