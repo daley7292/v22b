@@ -819,5 +819,119 @@ private function getOnlineCount($startTime)
 
 
 
+/**
+ * 获取节点流量统计
+ * @return array
+ */
+public function getNodalFlow()
+{
+    try {
+        // 获取当前时间戳作为基准时间
+        $baseTime = time();
+        
+        // 定义时间范围
+        $timeRanges = [
+            'today' => [strtotime('today'), $baseTime],
+            'week' => [strtotime('-7 days'), $baseTime],
+            'half_month' => [strtotime('-15 days'), $baseTime],
+            'month' => [strtotime('-30 days'), $baseTime],
+            'quarter' => [strtotime('-90 days'), $baseTime],
+            'half_year' => [strtotime('-180 days'), $baseTime],
+            'year' => [strtotime('-365 days'), $baseTime]
+        ];
+
+        // 获取所有服务器信息
+        $servers = [
+            'hysteria' => DB::table('v2_server_hysteria')->select(['id', 'name'])->get()->keyBy('id'),
+            'shadowsocks' => DB::table('v2_server_shadowsocks')->select(['id', 'name'])->get()->keyBy('id'),
+            'trojan' => DB::table('v2_server_trojan')->select(['id', 'name'])->get()->keyBy('id'),
+            'vmess' => DB::table('v2_server_vmess')->select(['id', 'name'])->get()->keyBy('id')
+        ];
+
+        // 初始化结果数组
+        $result = [];
+        
+        // 遍历每个时间范围获取统计数据
+        foreach ($timeRanges as $period => $range) {
+            // 获取该时间范围内的流量数据
+            $stats = StatServer::select([
+                'server_id',
+                'server_type',
+                DB::raw('SUM(u + d) as total_traffic')
+            ])
+            ->whereBetween('record_at', $range)
+            ->groupBy('server_id', 'server_type')
+            ->get();
+
+            // 处理统计数据
+            $periodStats = [];
+            foreach ($stats as $stat) {
+                // 获取对应服务器信息
+                $serverInfo = $servers[$stat->server_type][$stat->server_id] ?? null;
+                if (!$serverInfo) continue;
+
+                $periodStats[] = [
+                    'server_id' => $stat->server_id,
+                    'server_name' => $serverInfo->name,
+                    'server_type' => $stat->server_type,
+                    'traffic' => [
+                        'bytes' => $stat->total_traffic,
+                        'mb' => round($stat->total_traffic / 1024 / 1024, 2),
+                        'gb' => round($stat->total_traffic / 1024 / 1024 / 1024, 2)
+                    ]
+                ];
+            }
+
+            // 按流量降序排序
+            usort($periodStats, function($a, $b) {
+                return $b['traffic']['bytes'] - $a['traffic']['bytes'];
+            });
+
+            $result[$period] = [
+                'time_range' => [
+                    'start' => date('Y-m-d H:i:s', $range[0]),
+                    'end' => date('Y-m-d H:i:s', $range[1])
+                ],
+                'total_traffic' => array_sum(array_column(array_column($periodStats, 'traffic'), 'bytes')),
+                'servers' => $periodStats
+            ];
+        }
+
+        // 计算总计数据
+        $totalStats = [
+            'total_servers' => count($stats),
+            'total_traffic' => array_sum(array_column($result, 'total_traffic')),
+            'server_types' => [
+                'hysteria' => count($servers['hysteria']),
+                'shadowsocks' => count($servers['shadowsocks']),
+                'trojan' => count($servers['trojan']),
+                'vmess' => count($servers['vmess'])
+            ]
+        ];
+
+        return [
+            'data' => [
+                'statistics' => $result,
+                'summary' => $totalStats,
+                'last_updated' => date('Y-m-d H:i:s')
+            ]
+        ];
+
+    } catch (\Exception $e) {
+        \Log::error('获取节点流量统计失败:', [
+            'message' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        
+        return [
+            'data' => [
+                'error' => '获取统计数据失败: ' . $e->getMessage(),
+                'last_updated' => date('Y-m-d H:i:s')
+            ]
+        ];
+    }
+}
+
+
 }
 

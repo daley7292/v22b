@@ -97,6 +97,7 @@ class AdminRoute
             $router->get ('/stat/getServerLastRank', 'Admin\\StatController@getServerLastRank');
             $router->get ('/stat/getFinances', 'Admin\\StatController@getFinances');
             $router->get ('/stat/getOnlinePresence', 'Admin\\StatController@getOnlinePresence');
+            $router->get ('/stat/getNodalFlow', 'Admin\\StatController@getNodalFlow');
             $router->get ('/stat/getOrder', 'Admin\\StatController@getOrder');
             $router->get ('/stat/getStatUser', 'Admin\\StatController@getStatUser');
             $router->get ('/stat/getRanking', 'Admin\\StatController@getRanking');
