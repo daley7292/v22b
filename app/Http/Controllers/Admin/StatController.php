@@ -725,5 +725,99 @@ private function calculateGrowthRate($current, $previous)
     return round(($current - $previous) / $previous * 100, 2);
 }
 
+
+
+
+/**
+ * 获取在线用户统计数据
+ * @return array
+ */
+public function getOnlinePresence()
+{
+
+ 
+       // 获取当前时间戳作为基准时间
+       $baseTime = time();
+        
+       // 定义时间范围
+       $timeRanges = [
+           'current' => $baseTime - 600, // 最近10分钟
+           'today' => strtotime('today'),
+           'three_days' => $baseTime - (3 * 86400),
+           'seven_days' => $baseTime - (7 * 86400),
+           'fifteen_days' => $baseTime - (15 * 86400),
+           'thirty_days' => $baseTime - (30 * 86400)
+       ];
+
+       // 构建基础查询 - 只查询有流量变化的记录
+       $baseQuery = StatUser::where(function($query) {
+           $query->where('u', '>', 0)
+               ->orWhere('d', '>', 0);
+       });
+
+       // 获取各时间段的活跃用户数
+       $stats = [
+           'current_online' => (clone $baseQuery)
+               ->where('created_at', '>=', $timeRanges['current'])
+               ->distinct('user_id')
+               ->count('user_id'),
+           'today_online' => (clone $baseQuery)
+               ->where('created_at', '>=', $timeRanges['today'])
+               ->distinct('user_id')
+               ->count('user_id'),
+           'three_days_online' => (clone $baseQuery)
+               ->where('created_at', '>=', $timeRanges['three_days'])
+               ->distinct('user_id')
+               ->count('user_id'),
+           'seven_days_online' => (clone $baseQuery)
+               ->where('created_at', '>=', $timeRanges['seven_days'])
+               ->distinct('user_id')
+               ->count('user_id'),
+           'fifteen_days_online' => (clone $baseQuery)
+               ->where('created_at', '>=', $timeRanges['fifteen_days'])
+               ->distinct('user_id')
+               ->count('user_id'),
+           'thirty_days_online' => (clone $baseQuery)
+               ->where('created_at', '>=', $timeRanges['thirty_days'])
+               ->distinct('user_id')
+               ->count('user_id')
+       ];
+
+       // 添加调试信息
+       $debug = [
+           'current_time' => date('Y-m-d H:i:s', $baseTime),
+           'time_ranges' => array_map(function($timestamp) {
+               return date('Y-m-d H:i:s', $timestamp);
+           }, $timeRanges),
+           'query_conditions' => [
+               'current_online_start' => date('Y-m-d H:i:s', $timeRanges['current']),
+               'has_traffic' => 'u > 0 OR d > 0'
+           ]
+       ];
+
+       return [
+           'data' => [
+               'statistics' => $stats,
+            //   'debug' => $debug,
+               'last_updated' => date('Y-m-d H:i:s')
+           ]
+       ];
+    
+}
+
+/**
+ * 获取指定时间段内的在线用户数
+ * @param int $startTime
+ * @return int
+ */
+private function getOnlineCount($startTime)
+{
+    return StatUser::where('created_at', '>=', $startTime)
+        ->distinct('user_id')
+        ->count('user_id');
+}
+
+
+
 }
 
