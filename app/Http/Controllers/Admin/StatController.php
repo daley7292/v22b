@@ -481,13 +481,13 @@ public function getFinances(Request $request)
     $lastYearIncome = $lastYearData->sum('total_amount');
 
     // 准备图表数据
-    $chartData = $data->map(function ($item) use ($previousData, $lastYearData) {
-        $previousDay = $previousData->firstWhere('date', $item->date - ($endTime - $startTime));
+    $chartData = $data->map(function ($item) use ($previousData, $lastYearData, $startTime, $endTime) {  // 添加 $startTime, $endTime
+        $previousDay = $previousData->firstWhere('date', date('Y-m-d', strtotime($item->date) - ($endTime - $startTime)));  // 修改时间计算方式
         $lastYearDay = $lastYearData->firstWhere('date', date('Y-m-d', strtotime('-1 year', strtotime($item->date))));
 
         return [
             'date' => $item->date,
-            'current' => $item->total_amount / 100, // 转换为元
+            'current' => $item->total_amount / 100,
             'previous' => $previousDay ? $previousDay->total_amount / 100 : 0,
             'lastYear' => $lastYearDay ? $lastYearDay->total_amount / 100 : 0,
         ];
