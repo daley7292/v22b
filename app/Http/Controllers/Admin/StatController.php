@@ -418,53 +418,22 @@ public function getFinances(Request $request)
 {
     // 验证请求参数
     $request->validate([
-        'type' => 'required|in:week,half_month,month,quarter,half_year,year'
+        'start_date' => 'required|date',
+        'end_date' => 'required|date|after_or_equal:start_date'
     ]);
 
-    // 获取时间范围
-    $endTime = time();
-    $type = $request->input('type');
+    // 规范时间获取
+    $endTime = strtotime($request->input('end_date') . ' 23:59:59');
+    $startTime = strtotime($request->input('start_date') . ' 00:00:00');
 
-    // 将 match 替换为 switch
-    switch ($type) {
-        case 'week':
-            $startTime = strtotime('-1 week', $endTime);
-            $interval = '1 day';
-            break;
-        case 'half_month':
-            $startTime = strtotime('-15 days', $endTime);
-            $interval = '1 day';
-            break;
-        case 'month':
-            $startTime = strtotime('-1 month', $endTime);
-            $interval = '1 day';
-            break;
-        case 'quarter':
-            $startTime = strtotime('-3 months', $endTime);
-            $interval = '1 week';
-            break;
-        case 'half_year':
-            $startTime = strtotime('-6 months', $endTime);
-            $interval = '1 week';
-            break;
-        case 'year':
-            $startTime = strtotime('-1 year', $endTime);
-            $interval = '1 month';
-            break;
-        default:
-            $startTime = strtotime('-1 month', $endTime);
-            $interval = '1 day';
-    }
+    // 计算周期天数
+    $periodDays = ceil(($endTime - $startTime) / 86400);
 
-    // 获取上一个周期的时间范围
-    $previousEndTime = $startTime;
-    $previousStartTime = $startTime - ($endTime - $startTime);
-
-    // 获取所有时间段的数据
-    $orderSums = Order::selectRaw("
-            DATE_FORMAT(created_at, '%Y-%m-%d') as date,
+    // 一次性获取所有时间段的数据
+    $data = Order::selectRaw('
+            DATE_FORMAT(created_at, "%Y-%m-%d") as date,
             SUM(total_amount) as total_amount
-        ")
+        ')
         ->where('created_at', '>=', $startTime)
         ->where('created_at', '<=', $endTime)
         ->where('status', 3)
@@ -472,44 +441,64 @@ public function getFinances(Request $request)
         ->orderBy('date', 'asc')
         ->get();
 
-    // 计算当前周期和上一周期的收入
-    $currentIncome = $orderSums->where('date', '>=', date('Y-m-d', $startTime))
-        ->where('date', '<=', date('Y-m-d', $endTime))
-        ->sum('total_amount');
+    // 获取各时期收入
+    $currentIncome = $data->sum('total_amount');
 
-    $previousIncome = $orderSums->where('date', '>=', date('Y-m-d', $previousStartTime))
-        ->where('date', '<=', date('Y-m-d', $previousEndTime))
-        ->sum('total_amount');
+    // 计算环比周期的时间范围（上一个相同时间长度）
+    $previousStartTime = $startTime - ($endTime - $startTime);
+    $previousEndTime = $previousStartTime + ($endTime - $startTime) - 1;
 
-    // 计算增长率
-    $growthRate = $previousIncome > 0 ?
-        round((($currentIncome - $previousIncome) / $previousIncome) * 100, 2) : 0;
+    // 获取环比周期收入
+    $previousData = Order::selectRaw('
+            DATE_FORMAT(created_at, "%Y-%m-%d") as date,
+            SUM(total_amount) as total_amount
+        ')
+        ->where('created_at', '>=', $previousStartTime)
+        ->where('created_at', '<=', $previousEndTime)
+        ->where('status', 3)
+        ->groupBy('date')
+        ->orderBy('date', 'asc')
+        ->get();
+
+    $previousIncome = $previousData->sum('total_amount');
+
+    // 计算同比周期的时间范围（去年同期）
+    $lastYearStartTime = strtotime('-1 year', $startTime);
+    $lastYearEndTime = strtotime('-1 year', $endTime);
+
+    // 获取同比周期收入
+    $lastYearData = Order::selectRaw('
+            DATE_FORMAT(created_at, "%Y-%m-%d") as date,
+            SUM(total_amount) as total_amount
+        ')
+        ->where('created_at', '>=', $lastYearStartTime)
+        ->where('created_at', '<=', $lastYearEndTime)
+        ->where('status', 3)
+        ->groupBy('date')
+        ->orderBy('date', 'asc')
+        ->get();
+
+    $lastYearIncome = $lastYearData->sum('total_amount');
 
     // 准备图表数据
-    $chartData = $orderSums->map(function ($item) {
+    $chartData = $data->map(function ($item) use ($previousData, $lastYearData) {
+        $previousDay = $previousData->firstWhere('date', $item->date - ($endTime - $startTime));
+        $lastYearDay = $lastYearData->firstWhere('date', date('Y-m-d', strtotime('-1 year', strtotime($item->date))));
+
         return [
             'date' => $item->date,
-            'income' => $item->total_amount / 100, // 转换为元
-            'type' => '收入'
+            'current' => $item->total_amount / 100, // 转换为元
+            'previous' => $previousDay ? $previousDay->total_amount / 100 : 0,
+            'lastYear' => $lastYearDay ? $lastYearDay->total_amount / 100 : 0,
         ];
     })->all();
 
-    // 获取各时间维度的统计数据
-    $monthIncome = $orderSums->where('date', '>=', date('Y-m-d', strtotime('-1 month', $endTime)))
-        ->where('date', '<=', date('Y-m-d', $endTime))
-        ->sum('total_amount');
+    // 计算增长率
+    $yearOnYear = $lastYearIncome > 0 ?
+        round((($currentIncome - $lastYearIncome) / $lastYearIncome) * 100, 2) : 0;
 
-    $quarterIncome = $orderSums->where('date', '>=', date('Y-m-d', strtotime('-3 months', $endTime)))
-        ->where('date', '<=', date('Y-m-d', $endTime))
-        ->sum('total_amount');
-
-    $halfYearIncome = $orderSums->where('date', '>=', date('Y-m-d', strtotime('-6 months', $endTime)))
-        ->where('date', '<=', date('Y-m-d', $endTime))
-        ->sum('total_amount');
-
-    $yearIncome = $orderSums->where('date', '>=', date('Y-m-d', strtotime('-1 year', $endTime)))
-        ->where('date', '<=', date('Y-m-d', $endTime))
-        ->sum('total_amount');
+    $chainRatio = $previousIncome > 0 ?
+        round((($currentIncome - $previousIncome) / $previousIncome) * 100, 2) : 0;
 
     return [
         'data' => [
@@ -517,26 +506,33 @@ public function getFinances(Request $request)
                 'start_date' => date('Y-m-d', $startTime),
                 'end_date' => date('Y-m-d', $endTime),
                 'income' => $currentIncome / 100,
+                'days' => $periodDays
             ],
             'previous_period' => [
                 'start_date' => date('Y-m-d', $previousStartTime),
                 'end_date' => date('Y-m-d', $previousEndTime),
-                'income' => $previousIncome / 100,
+                'income' => $previousIncome / 100
             ],
-            'growth_rate' => $growthRate,
-            'growth_text' => $growthRate >= 0 ?
-                "较上一周期增长{$growthRate}%" :
-                "较上一周期下降" . abs($growthRate) . "%",
-            'total_statistics' => [
-                'month' => $monthIncome / 100,
-                'quarter' => $quarterIncome / 100,
-                'half_year' => $halfYearIncome / 100,
-                'year' => $yearIncome / 100,
+            'last_year_period' => [
+                'start_date' => date('Y-m-d', $lastYearStartTime),
+                'end_date' => date('Y-m-d', $lastYearEndTime),
+                'income' => $lastYearIncome / 100
+            ],
+            'comparison' => [
+                'chain_ratio' => $chainRatio,
+                'chain_text' => $chainRatio >= 0 ?
+                    "环比增长{$chainRatio}%" :
+                    "环比下降" . abs($chainRatio) . "%",
+                'year_on_year' => $yearOnYear,
+                'year_text' => $yearOnYear >= 0 ?
+                    "同比增长{$yearOnYear}%" :
+                    "同比下降" . abs($yearOnYear) . "%"
             ],
             'chart_data' => $chartData
         ]
     ];
 }
+
     public function getServerLastRank()
     {
         $servers = [
