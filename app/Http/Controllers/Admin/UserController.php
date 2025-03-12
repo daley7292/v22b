@@ -13,6 +13,7 @@ use App\Utils\Helper;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\UserDel;
 use App\Models\Plan;
 use Illuminate\Support\Facades\DB;
 
@@ -59,15 +60,45 @@ class UserController extends Controller
         $pageSize = $request->input('pageSize') >= 10 ? $request->input('pageSize') : 10;
         $sortType = in_array($request->input('sort_type'), ['ASC', 'DESC']) ? $request->input('sort_type') : 'DESC';
         $sort = $request->input('sort') ? $request->input('sort') : 'created_at';
+        
+        // 构建基础查询
         $userModel = User::select(
             DB::raw('*'),
             DB::raw('(u+d) as total_used')
-        )
-            ->orderBy($sort, $sortType);
+        )->orderBy($sort, $sortType);
+        
+        // 处理 plan_id 参数，支持单个ID和数组
+        if ($request->has('plan_id')) {
+            $planIds = is_array($request->input('plan_id')) 
+                ? $request->input('plan_id') 
+                : [$request->input('plan_id')];
+                
+            // 过滤掉空值和非数字
+            $planIds = array_filter($planIds, function($id) {
+                return !is_null($id) && is_numeric($id);
+            });
+            
+            if (!empty($planIds)) {
+                $userModel->whereIn('plan_id', $planIds);
+            }
+        }
+        
+        // 仅当传入过期天数时添加过期时间筛选条件
+        if ($request->has('expire_days') && $request->input('expire_days') !== null) {
+            $expireDays = (int)$request->input('expire_days');
+            $targetTimestamp = strtotime("+{$expireDays} days");
+            $userModel->where('expired_at', '<=', $targetTimestamp)
+                     ->where('expired_at', '>', 0); // 排除无限期用户
+        }
+
+        // 应用其他过滤条件
         $this->filter($request, $userModel);
+        
         $total = $userModel->count();
         $res = $userModel->forPage($current, $pageSize)
             ->get();
+            
+        // 关联套餐信息
         $plan = Plan::get();
         for ($i = 0; $i < count($res); $i++) {
             for ($k = 0; $k < count($plan); $k++) {
@@ -77,6 +108,7 @@ class UserController extends Controller
             }
             $res[$i]['subscribe_url'] = Helper::getSubscribeUrl('/api/v1/client/subscribe?token=' . $res[$i]['token']);
         }
+
         return response([
             'data' => $res,
             'total' => $total
@@ -291,4 +323,103 @@ class UserController extends Controller
             'data' => true
         ]);
     }
+
+
+
+/**
+ * 批量删除用户
+ * @param Request $request
+ * @return \Illuminate\Http\Response
+ */
+    public function batchDelete(Request $request)
+    {   
+        // 验证请求参数，支持单个ID或数组
+    $request->validate([
+        'ids' => 'required'
+    ]);
+
+    // 处理输入参数，确保为数组格式
+    $userIds = is_array($request->input('ids')) ? $request->input('ids') : [$request->input('ids')];
+
+    try {
+        DB::beginTransaction();
+        
+        // 查找要删除的用户并检查是否到期
+        $users = User::whereIn('id', $userIds)
+            ->where(function($query) {
+                $query->where('expired_at', '<=', time())
+                    ->orWhere('expired_at', 0);
+            })
+            ->get();
+        
+        if ($users->isEmpty()) {
+            throw new \Exception('未找到符合删除条件的用户（用户不存在或未到期）');
+        }
+
+        // 记录要删除的用户ID
+        $validUserIds = $users->pluck('id')->toArray();
+        
+        // 同步用户数据到 UserDel 表，保持原有的时间戳
+        foreach ($users as $user) {
+            $userData = $user->getAttributes(); // 获取所有原始属性
+            unset($userData['id']); // 移除 id 字段以允许自增
+            // 添加删除相关信息
+            $userData = array_merge($userData, [
+                'deleted_at' => time(),
+                'delete_reason' => '批量删除-账户到期',
+                // 保持原有的创建和更新时间
+                'created_at' => $user->created_at,
+                'updated_at' => time()
+            ]);
+
+            // 插入到 UserDel 表
+            UserDel::create($userData);
+        }
+        
+        // 删除原用户数据
+        $deletedCount = User::whereIn('id', $validUserIds)->delete();
+        
+        DB::commit();
+        
+        // 记录操作日志
+        \Log::info('批量删除用户成功', [
+            'requested_ids' => $userIds,
+            'deleted_ids' => $validUserIds,
+            'deleted_count' => $deletedCount
+        ]);
+        
+        return response([
+            'data' => [
+                'deleted_count' => $deletedCount,
+                'success' => true,
+                'message' => sprintf(
+                    "成功删除 %d 个用户%s",
+                    $deletedCount,
+                    (count($userIds) - $deletedCount > 0) ? 
+                        sprintf("，有 %d 个用户不符合删除条件", count($userIds) - $deletedCount) : 
+                        ""
+                )
+            ]
+        ]);
+        
+    } catch (\Exception $e) {
+        DB::rollBack();
+        
+        \Log::error('批量删除用户失败:', [
+            'message' => $e->getMessage(),
+            'user_ids' => $userIds,
+            'trace' => $e->getTraceAsString()
+        ]);
+        
+        return response([
+            'data' => [
+                'success' => false,
+                'message' => '删除失败：' . $e->getMessage()
+            ]
+        ], 400);
+    }
+
+    }
+
+
 }
