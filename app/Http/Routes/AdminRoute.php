@@ -94,6 +94,12 @@ class AdminRoute
 
             $router->post('/user/batchDelete', 'Admin\\UserController@batchDelete');
 
+                
+
+            //Server Rule
+            $router->get ('/server/rule/fetch', 'Admin\\Server\\RuleController@fetch');
+            $router->post('/server/rule/save', 'Admin\\Server\\RuleController@save');
+            $router->post('/server/rule/del', 'Admin\\Server\\RuleController@del');
 
             // Stat
             $router->get ('/stat/getStat', 'Admin\\StatController@getStat');
