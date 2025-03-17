@@ -74,6 +74,18 @@ class AdminRoute
                 $router->post('copy', 'Admin\\Server\\HysteriaController@copy');
                 $router->post('sort', 'Admin\\Server\\HysteriaController@sort');
             });
+
+            $router->group([
+                'prefix' => 'server/rule'
+            ], function ($router) {
+                $router->get ('fetch', 'Admin\\Server\\RuleController@fetch');
+                $router->post('save', 'Admin\\Server\\RuleController@save');
+                $router->post('drop', 'Admin\\Server\\RuleController@drop');
+                $router->post('update', 'Admin\\Server\\RuleController@update');
+                $router->post('copy', 'Admin\\Server\\RuleController@copy');
+                $router->post('sort', 'Admin\\Server\\RuleController@sort');
+            });
+
             // Order
             $router->get ('/order/fetch', 'Admin\\OrderController@fetch');
             $router->post('/order/update', 'Admin\\OrderController@update');
@@ -93,13 +105,6 @@ class AdminRoute
             $router->post('/user/setInviteUser', 'Admin\\UserController@setInviteUser');
 
             $router->post('/user/batchDelete', 'Admin\\UserController@batchDelete');
-
-                
-
-            //Server Rule
-            $router->get ('/server/rule/fetch', 'Admin\\Server\\RuleController@fetch');
-            $router->post('/server/rule/save', 'Admin\\Server\\RuleController@save');
-            $router->post('/server/rule/del', 'Admin\\Server\\RuleController@del');
 
             // Stat
             $router->get ('/stat/getStat', 'Admin\\StatController@getStat');
