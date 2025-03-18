@@ -92,77 +92,70 @@ class CheckCommission extends Command
             return false;
         }
 
-        // 2. 获取佣金比例
-        $commissionRate = config('v2board.commission_rate', 10); // 默认10%
-        $baseCommissionRate = $commissionRate / 100;
+        // 2. 计算实际佣金基数（按实际支付金额比例）
+        $commissionRate = $order->commission_balance / $order->total_amount;
+        $actualCommissionBase = (int)round($actualPaidAmount * $commissionRate);
         
-        // 3. 计算实际佣金基数
-        $actualCommissionBase = (int)round($actualPaidAmount * $baseCommissionRate);
-
-        // 4. 获取分销配置
-        $commissionShareLevels = (int)config('v2board.commission_distribution_enable', 0) 
-            ? [
+        // 3. 获取分销配置
+        if ((int)config('v2board.commission_distribution_enable', 0)) {
+            $commissionShareLevels = [
                 0 => (int)config('v2board.commission_distribution_l1'),
                 1 => (int)config('v2board.commission_distribution_l2'),
                 2 => (int)config('v2board.commission_distribution_l3')
-            ] 
-            : [0 => 100];
+            ];
+        } else {
+            $commissionShareLevels = [
+                0 => 100
+            ];
+        }
 
-        $totalCommissionPaid = 0;
-
-        // 5. 处理每级分销
+        // 4. 处理每级分销
         for ($l = 0; $l < $level; $l++) {
             $inviter = User::find($inviteUserId);
-            if (!$inviter || !isset($commissionShareLevels[$l])) {
-                continue;
-            }
+            if (!$inviter) continue;
+            if (!isset($commissionShareLevels[$l])) continue;
 
+            // 计算当前级别的佣金
             $commissionBalance = (int)round($actualCommissionBase * ($commissionShareLevels[$l] / 100));
-            if ($commissionBalance <= 0) {
-                continue;
-            }
+            if (!$commissionBalance) continue;
 
-            // 6. 更新邀请人余额
+            // 更新邀请人余额
             if ((int)config('v2board.withdraw_close_enable', 0)) {
-                $inviter->balance += $commissionBalance;
+                $inviter->balance = $inviter->balance + $commissionBalance;
             } else {
-                $inviter->commission_balance += $commissionBalance;
+                $inviter->commission_balance = $inviter->commission_balance + $commissionBalance;
             }
 
             if (!$inviter->save()) {
+                DB::rollBack();
                 return false;
             }
 
-            // 7. 记录佣金日志
-            if (!$this->createCommissionLog($inviter, $order, $actualPaidAmount, $commissionBalance, $baseCommissionRate)) {
+            // 记录佣金日志
+            if (!CommissionLog::create([
+                'invite_user_id' => $inviteUserId,
+                'user_id' => $order->user_id,
+                'trade_no' => $order->trade_no,
+                'order_amount' => $actualPaidAmount,  // 使用实际支付金额
+                'get_amount' => $commissionBalance,
+                'note' => sprintf(
+                    '订单金额：%.2f，优惠：%.2f，实付：%.2f，佣金率：%.2f%%',
+                    $order->total_amount / 100,
+                    ($order->discount_amount ?? 0) / 100,
+                    $actualPaidAmount / 100,
+                    $commissionRate * 100
+                )
+            ])) {
+                DB::rollBack();
                 return false;
             }
 
             $inviteUserId = $inviter->invite_user_id;
-            $totalCommissionPaid += $commissionBalance;
+            // 更新订单实际佣金
+            $order->actual_commission_balance = $order->actual_commission_balance + $commissionBalance;
         }
 
-        // 8. 更新订单实际佣金
-        $order->actual_commission_balance = $totalCommissionPaid;
-        return $order->save();
-    }
-
-    private function createCommissionLog($inviter, $order, $actualPaidAmount, $commissionBalance, $baseCommissionRate)
-    {
-        return CommissionLog::create([
-            'invite_user_id' => $inviter->id,
-            'user_id' => $order->user_id,
-            'trade_no' => $order->trade_no,
-            'order_amount' => $actualPaidAmount,
-            'get_amount' => $commissionBalance,
-            'note' => sprintf(
-                '订单金额：%.2f，优惠：%.2f，实付：%.2f，佣金率：%.2f%%',
-                $order->total_amount / 100,
-                ($order->discount_amount ?? 0) / 100,
-                $actualPaidAmount / 100,
-                $baseCommissionRate * 100
-            )
-        ]);
+        return true;
     }
 
 }
