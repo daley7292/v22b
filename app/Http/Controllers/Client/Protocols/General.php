@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Client\Protocols;
 
-
 use App\Utils\Helper;
 
 class General
@@ -23,7 +22,27 @@ class General
         $user = $this->user;
         $uri = '';
 
+         // 获取所有规则
+        $rules = \App\Models\ServerRule::all();
+        
         foreach ($servers as $item) {
+
+            $matched = false;
+
+            // 遍历规则查找匹配
+            foreach ($rules as $rule) {
+                $ruleGroupIds = explode(',', $rule->server_arr);
+                
+                if (in_array($item['group_id'], $ruleGroupIds)) {
+
+                    // 替换host和port
+                    $item['host'] = $rule->domain;
+                    $item['port'] = $rule->port;
+                    $matched = true;
+                    break; // 只跳出规则循环
+                }
+            }
+
             if ($item['type'] === 'vmess') {
                 $uri .= self::buildVmess($user['uuid'], $item);
             }

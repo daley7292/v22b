@@ -47,13 +47,13 @@ class PlanController extends Controller
                         'group_id' => $params['group_id'],
                         'transfer_enable' => $params['transfer_enable'] * 1073741824,
                         'speed_limit' => $params['speed_limit'],
-                        'ip_limit' => $params['ip_limit']
+                        'ip_limit' => $params['ip_limit']??0
                     ]);
                 }
                 $plan->update($params);
             } catch (\Exception $e) {
                 DB::rollBack();
-                abort(500, '保存失败');
+                abort(500, '保存失败'.'----'.$e->getMessage());
             }
             DB::commit();
             return response([

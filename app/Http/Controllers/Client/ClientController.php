@@ -14,6 +14,7 @@ class ClientController extends Controller
 {
     public function subscribe(Request $request)
     {
+
         $flag = $request->input('flag')
             ?? ($_SERVER['HTTP_USER_AGENT'] ?? '');
         $flag = strtolower($flag);
@@ -24,6 +25,8 @@ class ClientController extends Controller
             $serverService = new ServerService();
             $servers = $serverService->getAvailableServers($user);
             $servers = $this->filterServers($servers, $request);
+             
+            /*
             if($platform===''){
                 $servers = array_filter($servers, function($server) {
                     if (isset($server['tags']) && is_array($server['tags'])) {
@@ -33,12 +36,18 @@ class ClientController extends Controller
                 });
             }else{
                 $servers = array_filter($servers, function($server) use ($platform) {
+
+
+
+
+            
                     if (isset($server['tags']) && is_array($server['tags'])) {
                         return in_array($platform, $server['tags']);
                     }
                     return false;
                 });
             }
+            */
         } else {
             $subsDomain = $_SERVER['HTTP_HOST'];
             $servers = [
