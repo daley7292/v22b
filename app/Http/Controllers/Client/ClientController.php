@@ -36,11 +36,6 @@ class ClientController extends Controller
                 });
             }else{
                 $servers = array_filter($servers, function($server) use ($platform) {
-
-
-
-
-            
                     if (isset($server['tags']) && is_array($server['tags'])) {
                         return in_array($platform, $server['tags']);
                     }

@@ -41,6 +41,8 @@ class Kernel extends ConsoleKernel
         // horizon metrics
         $schedule->command('horizon:snapshot')->everyFiveMinutes();
         $schedule->command('customFunction:GetStatPaymentMethodMoney')->dailyAt('0:05');
+
+        $schedule->command('del:log'); //删除日志
     }
 
     /**
