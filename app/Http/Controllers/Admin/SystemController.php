@@ -101,5 +101,25 @@ class SystemController extends Controller
             return $master->status === 'paused';
         })->count();
     }
+
+
+    /*
+     * 删除日志
+     */
+    public function delLog()
+    {
+        // 执行删除操作
+        $mailLogCount = DB::table('v2_mail_log')->count();
+        $logCount = DB::table('v2_log')->count();
+
+        DB::table('v2_mail_log')->truncate();
+        DB::table('v2_log')->truncate();
+        return json_encode(array(
+            'mailLogCount' => $mailLogCount,
+            'logCount' => $logCount,
+            'data'=>true
+        ));
+
+    }
 }
 

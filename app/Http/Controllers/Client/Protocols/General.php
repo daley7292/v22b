@@ -27,22 +27,24 @@ class General
         
         foreach ($servers as $item) {
 
-            $matched = false;
+             $matched = false;
+            // 检查是否存在 group_id
+            if (isset($item['group_id'])) {
+                // 遍历规则查找匹配
+                foreach ($rules as $rule) {
+                    $ruleGroupIds = explode(',', $rule->server_arr);
+                    
+                    if (in_array($item['group_id'], $ruleGroupIds)) {
 
-            // 遍历规则查找匹配
-            foreach ($rules as $rule) {
-                $ruleGroupIds = explode(',', $rule->server_arr);
-                
-                if (in_array($item['group_id'], $ruleGroupIds)) {
-
-                    // 替换host和port
-                    $item['host'] = $rule->domain;
-                    $item['port'] = $rule->port;
-                    $matched = true;
-                    break; // 只跳出规则循环
+                        // 替换host和port
+                        $item['host'] = $rule->domain;
+                        $item['port'] = $rule->port;
+                        $matched = true;
+                        break; // 只跳出规则循环
+                    }
                 }
             }
-
+        // 如果没有匹配到规则，则使用原始的host和port
             if ($item['type'] === 'vmess') {
                 $uri .= self::buildVmess($user['uuid'], $item);
             }

@@ -76,6 +76,8 @@ class ClientController extends Controller
         die($class->handle());
     }
 
+    
+
     private function setSubscribeInfoToServers(&$servers, $user)
     {
         if (!isset($servers[0])) return;
@@ -125,5 +127,69 @@ private function filterServers(&$servers, Request $request)
     });
     return $servers;
 }
+
+
+public function getuuidSubscribe(Request $request)  {
+    $user = \App\Models\User::where([
+        'email' => $request->query('email'),
+        'uuid' => $request->query('uuid')
+    ])->first();
+
+    if (!$user) {
+        return response()->json([
+            'message' => '用户不存在'
+        ], 404);
+    }
+    // 3. 获取客户端信息
+    $flag = $request->input('flag') ?? ($_SERVER['HTTP_USER_AGENT'] ?? '');
+    $flag = strtolower($flag);
+    $platform = $request->input('platform') ?? ($request->input('p') ?? '');
+
+    // 4. 获取可用服务器
+    $userService = new UserService();
+    if ($userService->isAvailable($user)) {
+        $serverService = new ServerService();
+        $servers = $serverService->getAvailableServers($user);
+        $servers = $this->filterServers($servers, $request);
+    } else {
+        // 服务不可用时返回提示信息
+        $subsDomain = $_SERVER['HTTP_HOST'];
+        $servers = [
+            [
+                'type' => 'shadowsocks',
+                'port' => 443,
+                'host' => 'www.google.com',
+                'cipher' => 'aes-128-gcm',
+                'name' => '您的服务已到期',
+            ],
+            [
+                'type' => 'shadowsocks',
+                'port' => 443,
+                'host' => 'www.google.com',
+                'cipher' => 'aes-128-gcm',
+                'name' => '请登录'. $subsDomain.' 续费',
+            ],
+        ];
+    }
+
+    // 5. 设置订阅信息
+    $this->setSubscribeInfoToServers($servers, $user);
+
+    // 6. 根据客户端返回对应格式
+    if ($flag) {
+        foreach (array_reverse(glob(app_path('Http//Controllers//Client//Protocols') . '/*.php')) as $file) {
+            $file = 'App\\Http\\Controllers\\Client\\Protocols\\' . basename($file, '.php');
+            $class = new $file($user, $servers);
+            if (strpos($flag, $class->flag) !== false) {
+                die($class->handle());
+            }
+        }
+    }
+
+    // 7. 默认返回通用格式
+    $class = new General($user, $servers);
+    die($class->handle());
+}
+
 
 }
