@@ -105,6 +105,7 @@ class AdminRoute
             $router->post('/user/setInviteUser', 'Admin\\UserController@setInviteUser');
 
             $router->post('/user/batchDelete', 'Admin\\UserController@batchDelete');
+            $router->post('/user/getRenewalNewPurchase', 'Admin\\UserController@getRenewalNewPurchase');
 
             // Stat
             $router->get ('/stat/getStat', 'Admin\\StatController@getStat');

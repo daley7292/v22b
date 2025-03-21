@@ -324,102 +324,276 @@ class UserController extends Controller
         ]);
     }
 
-
-
-/**
- * 批量删除用户
- * @param Request $request
- * @return \Illuminate\Http\Response
- */
+    /**
+     * 批量删除用户
+     * @param Request $request
+     * @return \Illuminate\Http\Response
+     */
     public function batchDelete(Request $request)
     {   
         // 验证请求参数，支持单个ID或数组
-    $request->validate([
-        'ids' => 'required'
-    ]);
+        $request->validate([
+            'ids' => 'required'
+        ]);
 
-    // 处理输入参数，确保为数组格式
-    $userIds = is_array($request->input('ids')) ? $request->input('ids') : [$request->input('ids')];
+        // 处理输入参数，确保为数组格式
+        $userIds = is_array($request->input('ids')) ? $request->input('ids') : [$request->input('ids')];
 
-    try {
-        DB::beginTransaction();
-        
-        // 查找要删除的用户并检查是否到期
-        $users = User::whereIn('id', $userIds)
-            ->where(function($query) {
-                $query->where('expired_at', '<=', time())
-                    ->orWhere('expired_at', 0);
-            })
-            ->get();
-        
-        if ($users->isEmpty()) {
-            throw new \Exception('未找到符合删除条件的用户（用户不存在或未到期）');
-        }
+        try {
+            DB::beginTransaction();
+            
+            // 查找要删除的用户并检查是否到期
+            $users = User::whereIn('id', $userIds)
+                ->where(function($query) {
+                    $query->where('expired_at', '<=', time())
+                        ->orWhere('expired_at', 0);
+                })
+                ->get();
+            
+            if ($users->isEmpty()) {
+                throw new \Exception('未找到符合删除条件的用户（用户不存在或未到期）');
+            }
 
-        // 记录要删除的用户ID
-        $validUserIds = $users->pluck('id')->toArray();
-        
-        // 同步用户数据到 UserDel 表，保持原有的时间戳
-        foreach ($users as $user) {
-            $userData = $user->getAttributes(); // 获取所有原始属性
-            unset($userData['id']); // 移除 id 字段以允许自增
-            // 添加删除相关信息
-            $userData = array_merge($userData, [
-                'deleted_at' => time(),
-                'delete_reason' => '批量删除-账户到期',
-                // 保持原有的创建和更新时间
-                'created_at' => $user->created_at,
-                'updated_at' => time()
+            // 记录要删除的用户ID
+            $validUserIds = $users->pluck('id')->toArray();
+            
+            // 同步用户数据到 UserDel 表，保持原有的时间戳
+            foreach ($users as $user) {
+                $userData = $user->getAttributes(); // 获取所有原始属性
+                unset($userData['id']); // 移除 id 字段以允许自增
+                // 添加删除相关信息
+                $userData = array_merge($userData, [
+                    'deleted_at' => time(),
+                    'delete_reason' => '批量删除-账户到期',
+                    // 保持原有的创建和更新时间
+                    'created_at' => $user->created_at,
+                    'updated_at' => time()
+                ]);
+
+                // 插入到 UserDel 表
+                UserDel::create($userData);
+            }
+            
+            // 删除原用户数据
+            $deletedCount = User::whereIn('id', $validUserIds)->delete();
+            
+            DB::commit();
+            
+            // 记录操作日志
+            \Log::info('批量删除用户成功', [
+                'requested_ids' => $userIds,
+                'deleted_ids' => $validUserIds,
+                'deleted_count' => $deletedCount
             ]);
-
-            // 插入到 UserDel 表
-            UserDel::create($userData);
+            
+            return response([
+                'data' => [
+                    'deleted_count' => $deletedCount,
+                    'success' => true,
+                    'message' => sprintf(
+                        "成功删除 %d 个用户%s",
+                        $deletedCount,
+                        (count($userIds) - $deletedCount > 0) ? 
+                            sprintf("，有 %d 个用户不符合删除条件", count($userIds) - $deletedCount) : 
+                            ""
+                    )
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            DB::rollBack();
+            
+            \Log::error('批量删除用户失败:', [
+                'message' => $e->getMessage(),
+                'user_ids' => $userIds,
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response([
+                'data' => [
+                    'success' => false,
+                    'message' => '删除失败：' . $e->getMessage()
+                ]
+            ], 400);
         }
-        
-        // 删除原用户数据
-        $deletedCount = User::whereIn('id', $validUserIds)->delete();
-        
-        DB::commit();
-        
-        // 记录操作日志
-        \Log::info('批量删除用户成功', [
-            'requested_ids' => $userIds,
-            'deleted_ids' => $validUserIds,
-            'deleted_count' => $deletedCount
-        ]);
-        
-        return response([
-            'data' => [
-                'deleted_count' => $deletedCount,
-                'success' => true,
-                'message' => sprintf(
-                    "成功删除 %d 个用户%s",
-                    $deletedCount,
-                    (count($userIds) - $deletedCount > 0) ? 
-                        sprintf("，有 %d 个用户不符合删除条件", count($userIds) - $deletedCount) : 
-                        ""
-                )
-            ]
-        ]);
-        
-    } catch (\Exception $e) {
-        DB::rollBack();
-        
-        \Log::error('批量删除用户失败:', [
-            'message' => $e->getMessage(),
-            'user_ids' => $userIds,
-            'trace' => $e->getTraceAsString()
-        ]);
-        
-        return response([
-            'data' => [
-                'success' => false,
-                'message' => '删除失败：' . $e->getMessage()
-            ]
-        ], 400);
-    }
 
     }
 
+    /*
+    * 续费新购买获取单个用户数据
+    * @param Request $request
+    */
+    public function getRenewalNewPurchase(Request $request) 
+    {
+        // 验证请求参数
+        $request->validate([
+            'user_id' => 'integer|nullable',
+            'email' => 'email|nullable'
+        ], [
+            'user_id.integer' => '用户ID必须为数字',
+            'email.email' => '邮箱格式不正确'
+        ]);
+
+        // 至少需要提供一个查询条件
+        if (!$request->has('user_id') && !$request->has('email')) {
+            return response([
+                'message' => '请提供用户ID或邮箱进行查询'
+            ], 400);
+        }
+
+        // 查找用户
+        $user = null;
+        if ($request->has('user_id')) {
+            $user = User::find($request->input('user_id'));
+        } else if ($request->has('email')) {
+            $user = User::where('email', $request->input('email'))->first();
+        }
+
+        if (!$user) {
+            return response([
+                'message' => '用户不存在'
+            ], 404);
+        }
+
+        $userId = $user->id;
+        
+        // 定义时间周期映射
+        $periods = [
+            'month_1' => ['period' => 'month_price', 'name' => '月付'],
+            'quarter' => ['period' => 'quarter_price', 'name' => '季付'],
+            'half_year' => ['period' => 'half_year_price', 'name' => '半年付'],
+            'year' => ['period' => 'year_price', 'name' => '年付'],
+            'onetime' => ['period' => 'onetime_price', 'name' => '一次性'],
+            'reset_price' => ['period' => 'reset_price', 'name' => '重置流量'],
+        ];
+
+        try {
+            $result = [];
+            
+            // 遍历每个时间周期
+            foreach ($periods as $key => $periodInfo) {
+                // 查询新购订单数量
+                $newPurchaseCount = \App\Models\Order::where([
+                    'invite_user_id' => $userId,
+                    'type' => 1, // 新购
+                    'status' => 3, // 已完成
+                    'period' => $periodInfo['period']
+                ])->count();
+
+                // 查询续费订单数量
+                $renewalCount = \App\Models\Order::where([
+                    'invite_user_id' => $userId,
+                    'type' => 2, // 续费
+                    'status' => 3, // 已完成
+                    'period' => $periodInfo['period']
+                ])->count();
+
+                // 获取订单金额统计
+                $newPurchaseAmount = \App\Models\Order::where([
+                    'invite_user_id' => $userId,
+                    'type' => 1,
+                    'status' => 3,
+                    'period' => $periodInfo['period']
+                ])->sum('total_amount');
+
+                $renewalAmount = \App\Models\Order::where([
+                    'invite_user_id' => $userId,
+                    'type' => 2,
+                    'status' => 3,
+                    'period' => $periodInfo['period']
+                ])->sum('total_amount');
+
+                // 获取佣金统计
+                $newPurchaseCommission = \App\Models\Order::where([
+                    'invite_user_id' => $userId,
+                    'type' => 1,
+                    'status' => 3,
+                    'commission_status' => 2, // 有效佣金
+                    'period' => $periodInfo['period']
+                ])->sum('actual_commission_balance');
+
+                $renewalCommission = \App\Models\Order::where([
+                    'invite_user_id' => $userId,
+                    'type' => 2,
+                    'status' => 3,
+                    'commission_status' => 2,
+                    'period' => $periodInfo['period']
+                ])->sum('actual_commission_balance');
+
+                $result[$key] = [
+                    'period_name' => $periodInfo['name'],
+                    'new_purchase' => [
+                        'count' => $newPurchaseCount,
+                        'amount' => $newPurchaseAmount / 100, // 转换为元
+                        'commission' => $newPurchaseCommission / 100
+                    ],
+                    'renewal' => [
+                        'count' => $renewalCount,
+                        'amount' => $renewalAmount / 100,
+                        'commission' => $renewalCommission / 100
+                    ],
+                    'total' => [
+                        'count' => $newPurchaseCount + $renewalCount,
+                        'amount' => ($newPurchaseAmount + $renewalAmount) / 100,
+                        'commission' => ($newPurchaseCommission + $renewalCommission) / 100
+                    ]
+                ];
+            }
+
+            // 修改计算总计数据的部分
+            $totals = [
+                'new_purchase' => [
+                    'count' => 0,
+                    'amount' => 0,
+                    'commission' => 0
+                ],
+                'renewal' => [
+                    'count' => 0,
+                    'amount' => 0,
+                    'commission' => 0
+                ]
+            ];
+
+            // 正确计算总计
+            foreach ($result as $period) {
+                $totals['new_purchase']['count'] += $period['new_purchase']['count'];
+                $totals['new_purchase']['amount'] += $period['new_purchase']['amount'];
+                $totals['new_purchase']['commission'] += $period['new_purchase']['commission'];
+                
+                $totals['renewal']['count'] += $period['renewal']['count'];
+                $totals['renewal']['amount'] += $period['renewal']['amount'];
+                $totals['renewal']['commission'] += $period['renewal']['commission'];
+            }
+
+            // 获取用户基本信息
+            $user = \App\Models\User::find($userId);
+            
+            return response([
+                'data' => [
+                    'user_info' => [
+                        'id' => $user->id,
+                        'email' => $user->email,
+                        'commission_rate' => $user->commission_rate,
+                        'commission_balance' => $user->commission_balance / 100
+                    ],
+                    'statistics' => $result,
+                    'totals' => $totals
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            \Log::error('获取用户新购续费统计失败:', [
+                'user_id' => $userId,
+                'email' => $user->email,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response([
+                'message' => '获取统计数据失败',
+                'error'=> $e->getMessage()
+            ], 500);
+        }
+    }
 
 }
