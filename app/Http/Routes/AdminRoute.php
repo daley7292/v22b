@@ -156,6 +156,11 @@ class AdminRoute
             $router->get ('/system/getSystemLog', 'Admin\\SystemController@getSystemLog');
             $router->post ('/system/delLog', 'Admin\\SystemController@delLog');
 
+
+            //Convert
+            $router->get ('/convert/fetch', 'Admin\\ConvertController@fetch');
+            $router->post ('/convert/save', 'Admin\\ConvertController@save');
+
             // Theme
             $router->get ('/theme/getThemes', 'Admin\\ThemeController@getThemes');
             $router->post('/theme/saveThemeConfig', 'Admin\\ThemeController@saveThemeConfig');

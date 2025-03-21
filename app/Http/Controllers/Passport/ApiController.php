@@ -285,4 +285,16 @@ class ApiController extends Controller
             ], 500);
         }
     }
+
+
+    /*
+     * 新增兑换接口一体化注册
+     */
+    public function unificationReg()
+    {
+
+
+    }
+
+
 }
