@@ -14,7 +14,7 @@ class CouponGenerate extends FormRequest
     public function rules()
     {
         return [
-            'generate_count' => 'nullable|integer|max:500',
+            'generate_count' => 'nullable|integer|max:9999',
             'name' => 'required',
             'type' => 'required|in:1,2',
             'value' => 'required|integer',
@@ -33,7 +33,7 @@ class CouponGenerate extends FormRequest
     {
         return [
             'generate_count.integer' => '生成数量必须为数字',
-            'generate_count.max' => '生成数量最大为500个',
+            'generate_count.max' => '生成数量最大为9999个',
             'name.required' => '名称不能为空',
             'type.required' => '类型不能为空',
             'type.in' => '类型格式有误',
