@@ -160,7 +160,7 @@ class AdminRoute
             //Convert
             $router->get ('/convert/fetch', 'Admin\\ConvertController@fetch');
             $router->post ('/convert/save', 'Admin\\ConvertController@save');
-
+            $router->post ('/convert/getRedeemOrders', 'Admin\\ConvertController@getRedeemOrders');
             // Theme
             $router->get ('/theme/getThemes', 'Admin\\ThemeController@getThemes');
             $router->post('/theme/saveThemeConfig', 'Admin\\ThemeController@saveThemeConfig');

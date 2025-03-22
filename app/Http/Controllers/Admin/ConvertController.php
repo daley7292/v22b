@@ -175,4 +175,73 @@ class ConvertController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * 获取兑换码关联的订单数据
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getRedeemOrders(Request $request)
+    {
+        try {
+            // 1. 验证请求参数
+            $validated = $request->validate([
+                'redeem_code' => 'required|string|size:6',
+            ], [
+                'redeem_code.required' => '兑换码不能为空',
+                'redeem_code.string' => '兑换码必须为字符串',
+                'redeem_code.size' => '兑换码长度必须为6位'
+            ]);
+
+            // 2. 获取订单数据并关联用户信息
+            $orders = \App\Models\Order::with(['user' => function($query) {
+                    $query->select('id', 'email');
+                }])
+                ->where('redeem_code', $validated['redeem_code'])
+                ->orderBy('created_at', 'DESC')
+                ->get()
+                ->map(function ($order) {
+                    return [
+                        'order_id' => $order->id,
+                        'trade_no' => $order->trade_no,
+                        'email' => $order->user->email ?? '未知',
+                        'total_amount' => $order->total_amount,
+                        'status' => $order->status,
+                        'created_at' => date('Y-m-d H:i:s', $order->created_at),
+                        'updated_at' => date('Y-m-d H:i:s', $order->updated_at)
+                    ];
+                });
+
+            // 3. 获取兑换码信息
+            $convert = Convert::where('redeem_code', $validated['redeem_code'])->first();
+            if (!$convert) {
+                return response([
+                    'message' => '未找到该兑换码记录'
+                ], 404);
+            }
+
+            return response([
+                'data' => [
+                    'convert' => [
+                        'name' => $convert->name,
+                        'email' => $convert->email,
+                        'ordinal_number' => $convert->ordinal_number,
+                        'end_at' => date('Y-m-d H:i:s', $convert->end_at)
+                    ],
+                    'orders' => $orders
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('获取兑换码订单数据失败:', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'redeem_code' => $request->input('redeem_code')
+            ]);
+
+            return response([
+                'message' => '获取数据失败：' . $e->getMessage()
+            ], 500);
+        }
+    }
 }
