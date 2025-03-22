@@ -24,6 +24,8 @@ class UserRoute
             $router->post('/getQuickLoginUrl', 'User\\UserController@getQuickLoginUrl');
             $router->get ('/getActiveSession', 'User\\UserController@getActiveSession');
             $router->post('/removeActiveSession', 'User\\UserController@removeActiveSession');
+            $router->post ('/stat/getTrafficLog', 'User\\StatController@getTrafficLog');
+            $router->post ('/redeemPlan', 'User\\UserController@redeemPlan');
             // Order
             $router->post('/order/save', 'User\\OrderController@save');
             $router->post('/order/checkout', 'User\\OrderController@checkout');
@@ -31,7 +33,6 @@ class UserRoute
             $router->get ('/order/detail', 'User\\OrderController@detail');
             $router->get ('/order/fetch', 'User\\OrderController@fetch');
             $router->get ('/order/getPaymentMethod', 'User\\OrderController@getPaymentMethod');
-            $router->post('/order/cancel', 'User\\OrderController@cancel');
             // Plan
             $router->get ('/plan/fetch', 'User\\PlanController@fetch');
             // Invite
