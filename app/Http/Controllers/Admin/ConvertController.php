@@ -36,44 +36,84 @@ class ConvertController extends Controller
         }
     }
 
+    /**
+     * 生成唯一的兑换码
+     * @return string
+     */
+    private function generateUniqueRedeemCode()
+    {
+        do {
+            // 生成6位数字+字母的随机字符串
+            $chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            $code = '';
+            for ($i = 0; $i < 6; $i++) {
+                $code .= $chars[random_int(0, strlen($chars) - 1)];
+            }
+            // 检查是否已存在
+            $exists = Convert::where('redeem_code', $code)->exists();
+        } while ($exists);
+
+        return $code;
+    }
+
     public function save(Request $request)
     {
         // 1. 验证请求参数
         $validated = $request->validate([
             'id' => 'nullable|integer',  // id可选
-            'name' => 'required|string',
-            'plan_id' => 'required|integer',
-            'duration_unit' => 'required|string',
-            'duration_value' => 'required|integer',
-            'is_invitation' => 'required|integer',
-            'email' => 'required|string|email',
-            'ordinal_number' => 'required|integer',
-            'end_at' => 'required|integer'
+            'name' => 'required|string|max:255',
+            'plan_id' => 'required|integer|min:1',
+            'duration_unit' => 'required|string|in:day,month,year,quarter,half_year,onetime',
+            'duration_value' => 'required|integer|min:1',
+            'is_invitation' => 'required|integer|in:0,1',
+            'email' => 'required|string|email|max:255',
+            'ordinal_number' => 'required|integer|min:-1', // 允许-1(已用尽)、0(无限制)和正整数
+            'end_at' => [
+                'required',
+                'integer',
+                function ($attribute, $value, $fail) {
+                    if ($value < time()) {
+                        $fail('结束时间不能小于当前时间');
+                    }
+                }
+            ]
         ], [
             'id.integer' => 'ID必须为整数',
             'name.required' => '名称不能为空',
             'name.string' => '名称必须为字符串',
+            'name.max' => '名称最大长度为255个字符',
             'plan_id.required' => '套餐ID不能为空',
             'plan_id.integer' => '套餐ID必须为整数',
+            'plan_id.min' => '套餐ID必须大于0',
             'duration_unit.required' => '时间单位不能为空',
             'duration_unit.string' => '时间单位必须为字符串',
+            'duration_unit.in' => '时间单位只能是 day/month/year/quarter/half_year/onetime',
             'duration_value.required' => '时间值不能为空',
             'duration_value.integer' => '时间值必须为整数',
+            'duration_value.min' => '时间值必须大于0',
             'is_invitation.required' => '邀请开关不能为空',
             'is_invitation.integer' => '邀请开关必须为整数',
+            'is_invitation.in' => '邀请开关只能是0或1',
             'email.required' => '邮箱不能为空',
             'email.string' => '邮箱必须为字符串',
             'email.email' => '邮箱格式不正确',
-            'ordinal_number.required' => '序号不能为空',
-            'ordinal_number.integer' => '序号必须为整数',
+            'email.max' => '邮箱最大长度为255个字符',
+            'ordinal_number.required' => '兑换次数不能为空',
+            'ordinal_number.integer' => '兑换次数必须为整数',
+            'ordinal_number.min' => '兑换次数不能小于-1',
             'end_at.required' => '结束时间不能为空',
-            'end_at.integer' => '结束时间必须为时间戳'
+            'end_at.integer' => '结束时间必须为时间戳格式'
         ]);
 
         try {
+            // 获取当前时间戳
+            $now = time();
+            
             // 2. 准备数据
             $data = array_merge($validated, [
-                'updated_at' => time()
+                'created_at' => $now,
+                'updated_at' => $now,
+                'end_at' => $validated['end_at']
             ]);
 
             // 3. 查找并处理数据
@@ -85,6 +125,28 @@ class ConvertController extends Controller
                         'message' => '未找到ID为 ' . $validated['id'] . ' 的数据记录'
                     ], 404);
                 }
+                // 更新时只更新 updated_at，并保持原有 redeem_code 不变
+                $data['updated_at'] = $now;
+                unset($data['created_at']);
+                // 如果是更新，移除 redeem_code 字段避免更新
+                unset($data['redeem_code']);
+
+                // 检查兑换次数修改的合法性
+                if ($convert->ordinal_number === -1 && $validated['ordinal_number'] !== -1) {
+                    return response([
+                        'message' => '已用尽的兑换码不能重新启用'
+                    ], 400);
+                }
+            } else {
+                // 新建记录时生成唯一的兑换码
+                $data['redeem_code'] = $this->generateUniqueRedeemCode();
+                
+                // 确保新建时兑换次数不为-1
+                if ($data['ordinal_number'] === -1) {
+                    return response([
+                        'message' => '新建记录的兑换次数不能为-1'
+                    ], 400);
+                }
             }
 
             // 4. 更新或创建记录
@@ -92,7 +154,6 @@ class ConvertController extends Controller
                 $convert->update($data);
                 $message = '更新成功';
             } else {
-                $data['created_at'] = time();
                 Convert::create($data);
                 $message = '创建成功';
             }

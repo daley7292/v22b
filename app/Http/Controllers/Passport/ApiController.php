@@ -2,6 +2,15 @@
 
 namespace App\Http\Controllers\Passport;
 
+use App\Models\InviteCode;
+use App\Models\Order;
+use App\Models\Plan;
+use App\Models\User;
+use App\Services\AuthService;
+use App\Services\OrderService;
+use App\Utils\CacheKey;
+use App\Utils\Dict;
+use App\Utils\Helper;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Http;
@@ -286,15 +295,408 @@ class ApiController extends Controller
         }
     }
 
-
-    /*
-     * 新增兑换接口一体化注册
+    /**
+     * 验证注册限制
      */
-    public function unificationReg()
+    private function validateRegisterLimits(Request $request)
     {
+        // IP限制检查
+        if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
+            $registerCountByIP = Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip())) ?? 0;
+            if ((int)$registerCountByIP >= (int)config('v2board.register_limit_count', 3)) {
+                abort(500, __('Register frequently, please try again after :minute minute', [
+                    'minute' => config('v2board.register_limit_expire', 60)
+                ]));
+            }
+        }
 
+        // reCAPTCHA验证
+        if ((int)config('v2board.recaptcha_enable', 0)) {
+            $recaptcha = new ReCaptcha(config('v2board.recaptcha_key'));
+            $recaptchaResp = $recaptcha->verify($request->input('recaptcha_data'));
+            if (!$recaptchaResp->isSuccess()) {
+                abort(500, __('Invalid code is incorrect'));
+            }
+        }
 
+        // 邮箱白名单验证
+        $this->validateEmailRules($request);
+
+        // 注册开关与邀请码验证
+        $this->validateInviteCode($request);
     }
 
+    /**
+     * 验证邮箱规则
+     */
+    private function validateEmailRules(Request $request)
+    {
+        if ((int)config('v2board.email_whitelist_enable', 0)) {
+            if (!Helper::emailSuffixVerify(
+                $request->input('email'),
+                config('v2board.email_whitelist_suffix', Dict::EMAIL_WHITELIST_SUFFIX_DEFAULT))
+            ) {
+                abort(500, __('Email suffix is not in the Whitelist'));
+            }
+        }
 
+        if ((int)config('v2board.email_gmail_limit_enable', 0)) {
+            $prefix = explode('@', $request->input('email'))[0];
+            if (strpos($prefix, '.') !== false || strpos($prefix, '+') !== false) {
+                abort(500, __('Gmail alias is not supported'));
+            }
+        }
+    }
+
+    /**
+     * 验证邀请码
+     */
+    private function validateInviteCode(Request $request)
+    {
+        if ((int)config('v2board.stop_register', 0)) {
+            abort(500, __('Registration has closed'));
+        }
+
+        if ((int)config('v2board.invite_force', 0)) {
+            if (empty($request->input('invite_code'))) {
+                abort(500, __('You must use the invitation code to register'));
+            }
+        }
+    }
+
+    /**
+     * 创建新用户
+     */
+    private function createNewUser(Request $request)
+    {
+        $email = $request->input('email');
+        $password = $request->input('password');
+        
+        // 检查邮箱是否存在
+        if (User::where('email', $email)->first()) {
+            abort(500, __('Email already exists'));
+        }
+
+        $user = new User();
+        $user->email = $email;
+        $user->password = password_hash($password, PASSWORD_DEFAULT);
+        $user->uuid = Helper::guid(true);
+        $user->token = Helper::guid();
+
+        // 处理邀请码
+        $this->handleInviteCode($request, $user);
+        
+        // 处理试用计划
+        $this->handleTryOutPlan($user);
+
+        if (!$user->save()) {
+            abort(500, __('Register failed'));
+        }
+
+        return $user;
+    }
+
+    /**
+     * 处理邀请码逻辑
+     */
+    private function handleInviteCode(Request $request, User $user)
+    {
+        if ($request->input('invite_code')) {
+            $inviteCode = InviteCode::where('code', $request->input('invite_code'))
+                ->where('status', 0)
+                ->first();
+            if (!$inviteCode) {
+                if ((int)config('v2board.invite_force', 0)) {
+                    abort(500, __('Invalid invitation code'));
+                }
+            } else {
+                $user->invite_user_id = $inviteCode->user_id ? $inviteCode->user_id : null;
+                if (!(int)config('v2board.invite_never_expire', 0)) {
+                    $inviteCode->status = 1;
+                    $inviteCode->save();
+                }
+            }
+        }
+    }
+
+    /**
+     * 处理试用计划
+     */
+    private function handleTryOutPlan(User $user)
+    {
+        if ((int)config('v2board.try_out_plan_id', 0)) {
+            $plan = Plan::find(config('v2board.try_out_plan_id'));
+            if ($plan) {
+                $user->transfer_enable = $plan->transfer_enable * 1073741824;
+                $user->plan_id = $plan->id;
+                $user->group_id = $plan->group_id;
+                $user->expired_at = time() + (config('v2board.try_out_hour', 1) * 3600);
+                $user->speed_limit = $plan->speed_limit;
+            }
+        }
+    }
+
+    /**
+     * 处理邀请赠送
+     */
+    private function handleInvitePresent(User $user)
+    {
+        if ((int)config('v2board.invite_force_present') != 1) {
+            return;
+        }
+
+        $plan = Plan::find((int)config('v2board.complimentary_packages'));
+        if (!$plan) {
+            return;
+        }
+
+        $inviter = User::find($user->invite_user_id);
+        if (!$inviter || (int)config('v2board.try_out_plan_id') == $inviter->plan_id) {
+            return;
+        }
+
+        DB::transaction(function () use ($user, $plan, $inviter) {
+            // 创建赠送订单
+            $order = new Order();
+            $orderService = new OrderService($order);
+            $order->user_id = $user->invite_user_id;
+            $order->plan_id = $plan->id;
+            $order->period = 'month_price';
+            $order->trade_no = Helper::guid();
+            $order->total_amount = 0;
+            $order->status = 3;
+            $order->type = 6;
+            $orderService->setInvite($user);
+            $order->save();
+
+            // 计算并更新有效期
+            $this->updateInviterExpiry($inviter, $plan);
+        });
+    }
+
+    /**
+     * 更新邀请人的有效期
+     */
+    private function updateInviterExpiry(User $inviter, Plan $newPlan)
+    {
+        $currentPlan = Plan::find($inviter->plan_id);
+        if (!$currentPlan || $currentPlan->month_price <= 0 || $newPlan->month_price <= 0) {
+            return;
+        }
+
+        $hoursInMonth = 720;
+        $currentHourlyPrice = ($currentPlan->month_price / 100) / $hoursInMonth;
+        $complimentaryHourlyPrice = ($newPlan->month_price / 100) / $hoursInMonth;
+        
+        $equivalentComplimentaryHours = $complimentaryHourlyPrice / $currentHourlyPrice * $hoursInMonth;
+        $configComplimentaryHours = (int)config('v2board.complimentary_package_duration');
+        $totalComplimentaryHours = $equivalentComplimentaryHours + $configComplimentaryHours;
+        
+        $currentTimestamp = time();
+        $remainingHours = floor(($inviter->expired_at - $currentTimestamp) / 3600);
+        $totalHours = $remainingHours + $totalComplimentaryHours;
+        
+        $inviter->expired_at = $currentTimestamp + floor($totalHours * 3600);
+        $inviter->save();
+    }
+
+    /**
+     * 统一注册入口
+     */
+    public function unificationReg(Request $request)
+    {
+        // 1. 判断注册模式 - 兑换码注册优先级高于推广码注册
+        if ($request->has('redeem_code')) {
+            // 兑换码注册流程
+            $redeemInfo = $this->validateRedeemCode($request->input('redeem_code'));
+            if (!$redeemInfo) {
+                abort(400, '您的兑换码有误');
+            }
+            // 设置邀请人ID
+            $request->merge(['invite_user_id' => $redeemInfo['user_id']]);
+        } elseif ($request->has('invite_code')) {
+            // 推广码注册流程
+            $this->validateInviteCode($request);
+        }
+
+        // 2. 验证各项限制
+        $this->validateRegisterLimits($request);
+        
+        // 3. 验证邮箱验证码
+        if ((int)config('v2board.email_verify', 0)) {
+            if (empty($request->input('email_code'))) {
+                abort(500, __('Email verification code cannot be empty'));
+            }
+            if ((string)Cache::get(CacheKey::get('EMAIL_VERIFY_CODE', $request->input('email'))) !== (string)$request->input('email_code')) {
+                abort(500, __('Incorrect email verification code'));
+            }
+        }
+
+        // 4. 创建新用户
+        $user = $this->createNewUser($request);
+
+        // 5. 清理验证码缓存
+        if ((int)config('v2board.email_verify', 0)) {
+            Cache::forget(CacheKey::get('EMAIL_VERIFY_CODE', $request->input('email')));
+        }
+            
+        // 6. 更新最后登录时间
+        $user->last_login_at = time();
+        $user->save();
+
+        // 7. 更新IP限制缓存
+        if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
+            $registerCountByIP = Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip())) ?? 0;
+            Cache::put(
+                CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip()),
+                (int)$registerCountByIP + 1,
+                (int)config('v2board.register_limit_expire', 60) * 60
+            );
+        }
+
+        // 8. 根据不同注册模式处理套餐分配
+        if ($request->has('redeem_code')) {
+            // 兑换码注册 - 使用兑换码对应的套餐
+            $this->handleRedeemPlan($user, $redeemInfo);
+        } elseif ($request->has('invite_code')) {
+            // 推广码注册 - 使用试用计划并处理推广赠送
+            $this->handleTryOutPlan($user);
+            //$this->handleInvitePresent($user);  //取消赠送逻辑
+        } else {
+            // 普通注册 - 仅使用试用计划
+            $this->handleTryOutPlan($user);
+        }
+
+        // 9. 生成认证数据并返回
+        $authService = new AuthService($user);
+        return response()->json([
+            'data' => $authService->generateAuthData($request)
+        ]);
+    }
+
+    /**
+     * 验证兑换码
+     * @param string $redeemCode
+     * @return array|null
+     */
+    private function validateRedeemCode($redeemCode)  
+    {
+        if (empty($redeemCode)) {
+            return null;
+        }
+
+        // 从邀请码表中查找兑换码记录
+        $inviteCode = InviteCode::where('code', $redeemCode)
+            ->first();
+
+        if (!$inviteCode) {
+            return null;
+        }
+
+        // 查找对应的转换记录
+        $convert = \App\Models\Convert::where('redeem_code', $redeemCode)
+            ->where('end_at', '>', time())
+            ->first();
+
+        if (!$convert) {
+            return null;
+        }
+
+        // 检查兑换次数限制
+        if ($convert->ordinal_number === -1) {
+            abort(400, '该兑换码已无法使用');
+        }
+
+        // 检查是否需要更新兑换次数
+        if ($convert->ordinal_number > 0) {
+            if ($convert->ordinal_number === 1) {
+                $convert->ordinal_number = -1;  // 设置为已用尽状态
+            } else {
+                $convert->ordinal_number -= 1;  // 递减兑换次数
+            }
+            $convert->save();
+        }
+
+        return [
+            'plan_id' => $convert->plan_id,
+            'duration_unit' => $convert->duration_unit,
+            'duration_value' => $convert->duration_value,
+            'redeem_code' => $redeemCode,
+            'user_id' => $inviteCode->user_id // 从邀请码表获取user_id
+        ];
+    }
+
+    /**
+     * 处理兑换码套餐
+     */
+    private function handleRedeemPlan(User $user, array $redeemInfo)
+    {
+        $plan = Plan::find($redeemInfo['plan_id']);
+        if (!$plan) {
+            return;
+        }
+
+        // 设置用户套餐信息
+        $user->transfer_enable = $plan->transfer_enable * 1073741824;
+        $user->plan_id = $plan->id;
+        $user->group_id = $plan->group_id;
+        
+        // 计算到期时间和订单周期
+        $duration = 0;
+        $orderPeriod = '';
+        
+        switch ($redeemInfo['duration_unit']) {
+            case 'month':
+                $duration = $redeemInfo['duration_value'] * 30 * 86400;
+                $orderPeriod = 'month_price';
+                break;
+            case 'quarter':
+                $duration = $redeemInfo['duration_value'] * 90 * 86400;
+                $orderPeriod = 'quarter_price';
+                break;
+            case 'half_year':
+                $duration = $redeemInfo['duration_value'] * 180 * 86400;
+                $orderPeriod = 'half_year_price';
+                break;
+            case 'year':
+                $duration = $redeemInfo['duration_value'] * 365 * 86400;
+                $orderPeriod = 'year_price';
+                break;
+            default:
+                $duration = $redeemInfo['duration_value'] * 86400;
+                $orderPeriod = 'month_price'; // 默认按月
+        }
+        
+        $user->expired_at = time() + $duration;
+        $user->save();
+
+        // 创建赠送订单记录
+        try {
+            $order = new Order();
+            $orderService = new OrderService($order);
+            
+            $order->user_id = $user->id;
+            $order->plan_id = $plan->id;
+            $order->period = $orderPeriod;
+            $order->trade_no = Helper::guid();
+            $order->total_amount = 0; // 赠送订单金额为0
+            $order->status = 3; // 已完成状态
+            $order->type = 4; // 赠送类型
+            $order->redeem_code = $redeemInfo['redeem_code']; // 记录兑换码
+            
+            // 保存订单
+            if (!$order->save()) {
+                \Log::error('兑换码赠送订单创建失败:', [
+                    'user_id' => $user->id,
+                    'plan_id' => $plan->id,
+                    'redeem_code' => $redeemInfo['redeem_code']
+                ]);
+            }
+        } catch (\Exception $e) {
+            \Log::error('兑换码赠送订单异常:', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+        }
+    }
 }

@@ -26,6 +26,7 @@ class AppRoute
             $router->post('/appupdate', 'AppClient\\AppController@appupdate');
             $router->get('/homepage', 'AppClient\\AppController@token2Login');
             $router->post('/appalert', 'AppClient\\AppController@appalert');
+            $router->post('/unificationReg', 'AppClient\\AppController@unificationReg');
         });
     }
 }
