@@ -382,7 +382,7 @@ class ApiController extends Controller
         $user->password = password_hash($password, PASSWORD_DEFAULT);
         $user->uuid = Helper::guid(true);
         $user->token = Helper::guid();
-
+        $user->is_admin = 0;  // 显式设置默认值
         // 处理邀请码
         $this->handleInviteCode($request, $user);
         
@@ -581,23 +581,15 @@ class ApiController extends Controller
      */
     private function validateRedeemCode($redeemCode)  
     {
+
         if (empty($redeemCode)) {
-            return null;
-        }
-
-        // 从邀请码表中查找兑换码记录
-        $inviteCode = InviteCode::where('code', $redeemCode)
-            ->first();
-
-        if (!$inviteCode) {
             return null;
         }
 
         // 查找对应的转换记录
         $convert = \App\Models\Convert::where('redeem_code', $redeemCode)
             ->where('end_at', '>', time())
-            ->first();
-
+            ->first();  
         if (!$convert) {
             return null;
         }
@@ -607,6 +599,10 @@ class ApiController extends Controller
             abort(400, '该兑换码已无法使用');
         }
 
+        $User=\App\Models\User::where('email', $convert->email)->first();
+        if (!$User) {
+            return null;
+        }
         // 检查是否需要更新兑换次数
         if ($convert->ordinal_number > 0) {
             if ($convert->ordinal_number === 1) {
@@ -616,13 +612,12 @@ class ApiController extends Controller
             }
             $convert->save();
         }
-
         return [
             'plan_id' => $convert->plan_id,
             'duration_unit' => $convert->duration_unit,
             'duration_value' => $convert->duration_value,
             'redeem_code' => $redeemCode,
-            'user_id' => $inviteCode->user_id // 从邀请码表获取user_id
+            'user_id' => $User->id 
         ];
     }
 
