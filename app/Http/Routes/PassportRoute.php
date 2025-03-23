@@ -22,6 +22,7 @@ class PassportRoute
             $router->post('/comm/pv', 'Passport\\CommController@pv');
             // Api
             $router->post('/api/register', 'Passport\\ApiController@register');
+            $router->post('/api/unificationReg', 'Passport\\ApiController@unificationReg');
             $router->post('/api/order', 'Passport\\ApiController@validateCouponAndSaveOrder');
         });
     }
