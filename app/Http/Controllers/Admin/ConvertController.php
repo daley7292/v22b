@@ -43,8 +43,8 @@ class ConvertController extends Controller
     private function generateUniqueRedeemCode()
     {
         do {
-            // 生成6位数字+字母的随机字符串
-            $chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            // 使用不易混淆的字符
+            $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';  // 排除了 iIl1o0O
             $code = '';
             for ($i = 0; $i < 6; $i++) {
                 $code .= $chars[random_int(0, strlen($chars) - 1)];
