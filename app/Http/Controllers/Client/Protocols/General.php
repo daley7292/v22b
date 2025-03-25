@@ -22,29 +22,34 @@ class General
         $user = $this->user;
         $uri = '';
 
-         // 获取所有规则
+        // 获取所有规则
         $rules = \App\Models\ServerRule::all();
         
-        foreach ($servers as $item) {
+        // 获取请求的 User-Agent
+        $userAgent = request()->header('User-Agent');
 
-             $matched = false;
+        foreach ($servers as $item) {
+            $matched = false;
             // 检查是否存在 group_id
             if (isset($item['group_id'])) {
                 // 遍历规则查找匹配
                 foreach ($rules as $rule) {
-                    $ruleGroupIds = explode(',', $rule->server_arr);
-                    
-                    if (in_array($item['group_id'], $ruleGroupIds)) {
-
-                        // 替换host和port
-                        $item['host'] = $rule->domain;
-                        $item['port'] = $rule->port;
-                        $matched = true;
-                        break; // 只跳出规则循环
+                    // 首先检查 UA 是否匹配
+                    if (!empty($rule->ua) && strpos($userAgent, $rule->ua) !== false) {
+                        $ruleGroupIds = explode(',', $rule->server_arr);
+                        
+                        if (in_array($item['group_id'], $ruleGroupIds)) {
+                            // 替换host和port
+                            $item['host'] = $rule->domain;
+                            $item['port'] = $rule->port;
+                            $matched = true;
+                            break; // 只跳出规则循环
+                        }
                     }
                 }
             }
-        // 如果没有匹配到规则，则使用原始的host和port
+
+            // 如果没有匹配到规则，则使用原始的host和port
             if ($item['type'] === 'vmess') {
                 $uri .= self::buildVmess($user['uuid'], $item);
             }
