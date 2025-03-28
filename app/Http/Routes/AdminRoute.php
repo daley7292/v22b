@@ -118,6 +118,8 @@ class AdminRoute
             $router->get ('/stat/getStatUser', 'Admin\\StatController@getStatUser');
             $router->get ('/stat/getRanking', 'Admin\\StatController@getRanking');
             $router->get ('/stat/getStatRecord', 'Admin\\StatController@getStatRecord');
+            $router->post ('/stat/getColumnChart', 'Admin\\StatController@getColumnChart');
+
             // Notice
             $router->get ('/notice/fetch', 'Admin\\NoticeController@fetch');
             $router->post('/notice/save', 'Admin\\NoticeController@save');

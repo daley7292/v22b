@@ -23,6 +23,7 @@ class CommController extends Controller
                 'app_description' => config('v2board.app_description'),
                 'app_url' => config('v2board.app_url'),
                 'logo' => config('v2board.logo'),
+                'app_name'=>config('v2board.app_name'),
             ]
         ]);
     }
