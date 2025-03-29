@@ -23,6 +23,7 @@ class Order extends Model
         'total_amount',
         'status',
         'type',
+        'commission_status',
         'redeem_code',
         'created_at',
         'updated_at'

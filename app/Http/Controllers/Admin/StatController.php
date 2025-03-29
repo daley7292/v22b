@@ -1004,28 +1004,41 @@ public function getColumnChart(Request $request)
     try {
         $request->validate([
             'type' => 'required|in:day,week,month,quarter,half_year,year',
-            'start_time' => 'nullable|integer',
-            'end_time' => 'nullable|integer'
+            'start_time' => 'required|integer|min:0',  // 添加最小值验证
+            'end_time' => 'required|integer|min:0'     // 添加最小值验证
         ]);
 
-        // 使用开始和结束时间，确保结束时间是当天的23:59:59
-        $startTime = $request->input('start_time');
-        $endTime = $request->input('end_time') ? 
-            strtotime(date('Y-m-d 23:59:59', $request->input('end_time'))) : 
-            strtotime('today 23:59:59');
+        // 直接使用传入的时间戳
+        $startTime = (int)$request->input('start_time');
+        $endTime = (int)$request->input('end_time');
+
+        \Log::info('请求参数:', [
+            'type' => $request->input('type'),
+            'start_time' => date('Y-m-d H:i:s', $startTime),
+            'end_time' => date('Y-m-d H:i:s', $endTime)
+        ]);
+
+        // 获取当前选择的周期对应的 period
+        $periodMap = [
+            'day' => 'day_price',
+            'week' => 'week_price',
+            'month' => 'month_price',
+            'quarter' => 'quarter_price',
+            'half_year' => 'half_year_price',
+            'year' => 'year_price'
+        ];
+
+        $currentPeriod = $periodMap[$request->input('type')];
 
         $chartData = [];
-        // 计算总天数
         $totalDays = ceil(($endTime - $startTime) / 86400);
-        // 根据总天数平均分成7段
         $intervalDays = ceil($totalDays / 7);
         $interval = $intervalDays * 86400;
 
-        \Log::info('查询参数:', [
-            'start_time' => date('Y-m-d H:i:s', $startTime),
-            'end_time' => date('Y-m-d H:i:s', $endTime),
-            'total_days' => $totalDays,
-            'interval_days' => $intervalDays
+        \Log::info('时间计算:', [
+            'totalDays' => $totalDays,
+            'intervalDays' => $intervalDays,
+            'interval' => $interval
         ]);
 
         for ($i = 0; $i < 7; $i++) {
@@ -1036,47 +1049,50 @@ public function getColumnChart(Request $request)
 
             $date = date('m-d', $periodStart);
 
-            // 查询该时间段的订单数据
+            // 只查询当前周期的订单数据
             $periodOrders = DB::table('v2_order')
                 ->select(
                     'type',
-                    'period',
                     DB::raw('COUNT(*) as count'),
                     DB::raw('SUM(total_amount) as amount')
                 )
                 ->where('created_at', '>=', $periodStart)
                 ->where('created_at', '<=', $periodEnd)
                 ->where('status', 3)
-                ->groupBy('type', 'period')
+                ->where('period', $currentPeriod)  
+                ->groupBy('type')
                 ->get();
 
-            // 预设所有类型的默认值
-            $defaultTypes = [
-                'month_price' => ['新购' => 0, '续费' => 0],
-                'quarter_price' => ['新购' => 0, '续费' => 0],
-                'half_year_price' => ['新购' => 0, '续费' => 0],
-                'year_price' => ['新购' => 0, '续费' => 0]
+            // 预设默认值
+            $defaultData = [
+                '新购' => ['count' => 0, 'amount' => 0],
+                '续费' => ['count' => 0, 'amount' => 0]
             ];
 
             // 填充实际数据
             foreach ($periodOrders as $order) {
                 $typeName = $order->type == 1 ? '新购' : '续费';
-                if (isset($defaultTypes[$order->period])) {
-                    $defaultTypes[$order->period][$typeName] = $order->count;
-                }
+                $defaultData[$typeName]['count'] = $order->count;
+                $defaultData[$typeName]['amount'] = $order->amount;
             }
 
             // 生成图表数据
-            foreach ($defaultTypes as $period => $types) {
-                $periodName = $this->getPeriodName($period);
-                foreach ($types as $type => $count) {
-                    $chartData[] = [
-                        'type' => $periodName . $type,
-                        'date' => $date,
-                        'stack' => '订单',
-                        'value' => $count
-                    ];
-                }
+            foreach ($defaultData as $type => $data) {
+                // 订单数据
+                $chartData[] = [
+                    'type' => $type,
+                    'date' => $date,
+                    'stack' => '订单',
+                    'value' => $data['count']
+                ];
+                
+                // 金额数据
+                $chartData[] = [
+                    'type' => $type . '金额',
+                    'date' => $date,
+                    'stack' => '金额',
+                    'value' => round($data['amount'] / 100, 2)
+                ];
             }
         }
 

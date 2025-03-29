@@ -127,6 +127,8 @@ class OrderController extends Controller
         }
 
         try {
+            $params['updated_at'] = time();
+            //$params['commission_status'] = $request->input('commission_status');
             $order->update($params);
         } catch (\Exception $e) {
             abort(500, '更新失败');
