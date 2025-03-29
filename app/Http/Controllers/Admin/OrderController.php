@@ -163,7 +163,7 @@ class OrderController extends Controller
         $order->period = $request->input('period');
         $order->trade_no = Helper::guid();
         $order->total_amount = $request->input('total_amount');
-
+        $order->redeem_code='';
         if ($order->period === 'reset_price') {
             $order->type = 4;
         } else if ($user->plan_id !== NULL && $order->plan_id !== $user->plan_id) {

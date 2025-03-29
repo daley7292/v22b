@@ -179,9 +179,18 @@ class StatController extends Controller
         ];
     }
 
-    private function getChartData($timeRanges)
+    private function getChartData($timeRanges) 
     {
         $chartData = [];
+        $weekMap = [
+            0 => '周日',
+            1 => '周一',
+            2 => '周二', 
+            3 => '周三',
+            4 => '周四',
+            5 => '周五',
+            6 => '周六'
+        ];
         
         foreach (['last_week', 'this_week'] as $week) {
             $prefix = $week === 'last_week' ? '上周' : '本周';
@@ -193,31 +202,24 @@ class StatController extends Controller
                 if ($currentDayStart > time()) break;
                 
                 $currentDayEnd = min($currentDayStart + 86399, $dayEnd);
-                $chartData = array_merge(
-                    $chartData, 
-                    $this->getDayChartData($currentDayStart, $currentDayEnd, $prefix)
-                );
+                
+                // 获取当天是周几
+                $weekDay = date('w', $currentDayStart);
+                $weekDayName = $weekMap[$weekDay];
+                
+                // 使用周几替代日期
+                foreach (['new_purchase' => 1, 'renew' => 2] as $type => $value) {
+                    $count = $this->getOrderCount(['start' => $currentDayStart, 'end' => $currentDayEnd], $value);
+                    $chartData[] = [
+                        'date' => $weekDayName,  // 使用周几替代日期
+                        'type' => $prefix . ($type === 'new_purchase' ? '新购' : '续费'),
+                        'value' => $count
+                    ];
+                }
             }
         }
         
         return $chartData;
-    }
-
-    private function getDayChartData($dayStart, $dayEnd, $prefix)
-    {
-        $date = date('m-d', $dayStart);
-        $data = [];
-        
-        foreach (['new_purchase' => 1, 'renew' => 2] as $type => $value) {
-            $count = $this->getOrderCount(['start' => $dayStart, 'end' => $dayEnd], $value);
-            $data[] = [
-                'date' => $date,
-                'type' => $prefix . ($type === 'new_purchase' ? '新购' : '续费'),
-                'value' => $count
-            ];
-        }
-        
-        return $data;
     }
 
     private function getCommissionData()
@@ -850,69 +852,98 @@ public function getFinances(Request $request)
 }
 
 /**
- * 获取柱状图数据
- * @param Request $request
- * @return array
+ * 获取需要续费的订单数量
  */
-public function getColumnChart(Request $request)
+private function getNeedRenewOrders($startTime, $endTime)
 {
-    $request->validate([
-        'type' => 'required|in:day,week,month,quarter,half_year,year',
-        'start_time' => 'nullable|date',
-        'end_time' => 'nullable|date'
-    ]);
-
-    // 确定时间范围
-    list($startTime, $endTime) = $this->getTimeRange($request->input('type'), $request->input('start_time'), $request->input('end_time'));
-
-    // 获取订单数据
-    $orders = Order::where('created_at', '>=', $startTime)
-        ->where('created_at', '<=', $endTime)
-        ->where('status', 3)
-        ->get();
-
-    // 获取需要续费的订单
-    $needRenewOrders = Order::where('expired_at', '>=', $startTime)
-        ->where('expired_at', '<=', $endTime)
+    return Order::where('type', 1) // 新购订单
+        ->where('status', 3)  // 已完成订单
+        ->where(function($query) use ($startTime, $endTime) {
+            $query->whereRaw('DATE_ADD(FROM_UNIXTIME(created_at), INTERVAL CASE 
+                WHEN period = "month_price" THEN 30
+                WHEN period = "quarter_price" THEN 90
+                WHEN period = "half_year_price" THEN 180
+                WHEN period = "year_price" THEN 365
+                ELSE 30 END DAY) 
+                BETWEEN FROM_UNIXTIME(?) AND FROM_UNIXTIME(?)', [
+                $startTime,
+                $endTime
+            ]);
+        })
         ->count();
+}
 
-    // 实际续费的订单
-    $renewedOrders = Order::where('created_at', '>=', $startTime)
-        ->where('created_at', '<=', $endTime)
-        ->where('type', 2)
-        ->where('status', 3)
-        ->count();
+/**
+ * 按时间段分组数据
+ */
+private function groupDataByPeriod($orders, $startTime, $endTime, $type)
+{
+    try {
+        $chartData = [];
+        $current = $startTime;
+        $interval = $this->getIntervalByType($type);
+        $maxIterations = 1000;
+        $iteration = 0;
 
-    // 计算续费率
-    $renewalRate = $needRenewOrders > 0 ? 
-        round(($renewedOrders / $needRenewOrders) * 100, 2) : 0;
+        \Log::info('开始分组数据:', [
+            'startTime' => date('Y-m-d H:i:s', $startTime),
+            'endTime' => date('Y-m-d H:i:s', $endTime),
+            'type' => $type
+        ]);
 
-    // 统计数据
-    $statistics = [
-        'new_purchase' => [
-            'count' => $orders->where('type', 1)->count(),
-            'amount' => $orders->where('type', 1)->sum('total_amount') / 100
-        ],
-        'renewal' => [
-            'count' => $orders->where('type', 2)->count(),
-            'amount' => $orders->where('type', 2)->sum('total_amount') / 100
-        ],
-        'renewal_rate' => $renewalRate
-    ];
+        while ($current < $endTime && $iteration < $maxIterations) {
+            $periodEnd = min($current + $interval, $endTime);
+            
+            // 获取该时间段的订单
+            $periodOrders = DB::table('v2_order')
+                ->select(
+                    DB::raw('COUNT(CASE WHEN type = 1 THEN 1 END) as new_count'),
+                    DB::raw('COUNT(CASE WHEN type = 2 THEN 1 END) as renewal_count'),
+                    DB::raw('SUM(CASE WHEN type = 1 THEN total_amount ELSE 0 END) as new_amount'),
+                    DB::raw('SUM(CASE WHEN type = 2 THEN total_amount ELSE 0 END) as renewal_amount')
+                )
+                ->where('created_at', '>=', $current)
+                ->where('created_at', '<', $periodEnd)
+                ->where('status', 3)
+                ->first();
 
-    // 按时间段分组的数据
-    $chartData = $this->groupDataByPeriod($orders, $startTime, $endTime, $request->input('type'));
+            // 获取需要续费的订单数
+            $needRenewOrders = $this->getNeedRenewOrders($current, $periodEnd);
 
-    return [
-        'data' => [
-            'statistics' => $statistics,
-            'chart_data' => $chartData,
-            'time_range' => [
-                'start_time' => date('Y-m-d', $startTime),
-                'end_time' => date('Y-m-d', $endTime)
-            ]
-        ]
-    ];
+            // 新购数据点
+            $chartData[] = [
+                'date' => date('Y-m-d', $current),
+                'type' => '新购',
+                'value' => (int)$periodOrders->new_count
+            ];
+
+            // 续费数据点
+            $chartData[] = [
+                'date' => date('Y-m-d', $current),
+                'type' => '续费',
+                'value' => (int)$periodOrders->renewal_count
+            ];
+
+            $current = $periodEnd;
+            $iteration++;
+        }
+
+        if ($iteration >= $maxIterations) {
+            \Log::warning('达到最大循环次数限制', [
+                'maxIterations' => $maxIterations,
+                'type' => $type
+            ]);
+        }
+
+        return $chartData;
+
+    } catch (\Exception $e) {
+        \Log::error('groupDataByPeriod执行失败:', [
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        throw $e;
+    }
 }
 
 /**
@@ -920,11 +951,19 @@ public function getColumnChart(Request $request)
  */
 private function getTimeRange($type, $startTime = null, $endTime = null)
 {
+    // 如果传入了时间范围（时间戳格式），直接使用
     if ($startTime && $endTime) {
-        return [strtotime($startTime), strtotime($endTime)];
+        \Log::info('使用传入的时间范围:', [
+            'start' => date('Y-m-d H:i:s', $startTime),
+            'end' => date('Y-m-d H:i:s', $endTime)
+        ]);
+        return [(int)$startTime, (int)$endTime];
     }
 
-    $end = time();
+    // 如果未传入时间，默认为最近一周
+    $now = time();
+    $end = strtotime(date('Y-m-d 23:59:59', $now));
+    
     switch ($type) {
         case 'day':
             $start = strtotime('today');
@@ -933,67 +972,144 @@ private function getTimeRange($type, $startTime = null, $endTime = null)
             $start = strtotime('monday this week');
             break;
         case 'month':
-            $start = strtotime('first day of this month');
+            $start = strtotime(date('Y-m-01'));
             break;
         case 'quarter':
-            $start = strtotime('-90 days');
+            $start = strtotime('-90 days', strtotime(date('Y-m-d')));
             break;
         case 'half_year':
-            $start = strtotime('-180 days');
+            $start = strtotime('-180 days', strtotime(date('Y-m-d')));
             break;
         case 'year':
-            $start = strtotime('-365 days');
+            $start = strtotime(date('Y-01-01'));
             break;
         default:
-            $start = strtotime('-7 days');
+            $start = strtotime('-7 days', strtotime(date('Y-m-d')));
     }
+
+    \Log::info('使用默认时间范围:', [
+        'type' => $type,
+        'start' => date('Y-m-d H:i:s', $start),
+        'end' => date('Y-m-d H:i:s', $end)
+    ]);
+
     return [$start, $end];
 }
 
 /**
- * 按时间段分组数据
+ * 获取柱状图数据
  */
-private function groupDataByPeriod($orders, $startTime, $endTime, $type)
+public function getColumnChart(Request $request)
 {
-    $chartData = [];
-    $current = $startTime;
-    $interval = $this->getIntervalByType($type);
+    try {
+        $request->validate([
+            'type' => 'required|in:day,week,month,quarter,half_year,year',
+            'start_time' => 'nullable|integer',
+            'end_time' => 'nullable|integer'
+        ]);
 
-    while ($current <= $endTime) {
-        $periodEnd = min($current + $interval, $endTime);
-        $periodOrders = $orders->filter(function($order) use ($current, $periodEnd) {
-            return $order->created_at >= $current && $order->created_at <= $periodEnd;
-        });
+        list($startTime, $endTime) = $this->getTimeRange(
+            $request->input('type'),
+            $request->input('start_time'),
+            $request->input('end_time')
+        );
 
-        // 获取该时期需要续费的订单
-        $needRenewOrders = Order::where('expired_at', '>=', $current)
-            ->where('expired_at', '<=', $periodEnd)
-            ->count();
+        $chartData = [];
+        $weekInterval = ($endTime - $startTime) / 7;
+        
+        // 根据传入的type选择对应的统计类型
+        $types = $this->getTypesByPeriod($request->input('type'));
 
-        // 实际续费的订单
-        $renewedOrders = $periodOrders->where('type', 2)->count();
+        for ($i = 0; $i < 7; $i++) {
+            $weekStart = $startTime + ($i * $weekInterval);
+            $weekEnd = $weekStart + $weekInterval;
+            $date = date('m-d', $weekStart);
 
-        // 计算续费率
-        $renewalRate = $needRenewOrders > 0 ? 
-            round(($renewedOrders / $needRenewOrders) * 100, 2) : 0;
+            foreach ($types as $type) {
+                // 获取订单数据
+                $count = DB::table('v2_order')
+                    ->where('created_at', '>=', $weekStart)
+                    ->where('created_at', '<', $weekEnd)
+                    ->where('type', $type['type'])
+                    ->where('status', 3)
+                    ->where('period', 'like', $type['period'] . '%')
+                    ->count();
 
-        $chartData[] = [
-            'date' => date('Y-m-d', $current),
-            'new_purchase' => [
-                'count' => $periodOrders->where('type', 1)->count(),
-                'amount' => $periodOrders->where('type', 1)->sum('total_amount') / 100
-            ],
-            'renewal' => [
-                'count' => $renewedOrders,
-                'amount' => $periodOrders->where('type', 2)->sum('total_amount') / 100
-            ],
-            'renewal_rate' => $renewalRate
+                $chartData[] = [
+                    'type' => $type['name'],
+                    'date' => $date,
+                    'stack' => '订单',
+                    'value' => $count
+                ];
+
+                // 获取金额数据
+                $amount = DB::table('v2_order')
+                    ->where('created_at', '>=', $weekStart)
+                    ->where('created_at', '<', $weekEnd)
+                    ->where('type', $type['type'])
+                    ->where('status', 3)
+                    ->where('period', 'like', $type['period'] . '%')
+                    ->sum('total_amount');
+
+                $chartData[] = [
+                    'type' => $type['name'] . '金额',
+                    'date' => $date,
+                    'stack' => '金额',
+                    'value' => round($amount / 100, 2)
+                ];
+            }
+        }
+
+        return [
+            'data' => [
+                'chart_data' => $chartData,
+                'time_range' => [
+                    'start_time' => date('Y-m-d', $startTime),
+                    'end_time' => date('Y-m-d', $endTime)
+                ]
+            ]
         ];
 
-        $current = $periodEnd;
+    } catch (\Exception $e) {
+        \Log::error('获取柱状图数据失败:', [
+            'message' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        
+        return response()->json([
+            'message' => '获取数据失败: ' . $e->getMessage()
+        ], 500);
     }
+}
 
-    return $chartData;
+/**
+ * 根据时间周期获取对应的统计类型
+ */
+private function getTypesByPeriod($period)
+{
+    switch ($period) {
+        case 'week':
+            return [
+                ['name' => '续费', 'type' => 2, 'period' => $period],
+                ['name' => '新购', 'type' => 1, 'period' => $period]
+            ];
+        case 'month':
+            return [
+                ['name' => '月续费', 'type' => 2, 'period' => $period],
+                ['name' => '月新购', 'type' => 1, 'period' => $period]
+            ];
+        case 'quarter':
+            return [
+                ['name' => '季度续费', 'type' => 2, 'period' => $period],
+                ['name' => '季度新购', 'type' => 1, 'period' => $period]
+            ];
+        // ...其他类型
+        default:
+            return [
+                ['name' => '续费', 'type' => 2, 'period' => $period],
+                ['name' => '新购', 'type' => 1, 'period' => $period]
+            ];
+    }
 }
 
 /**

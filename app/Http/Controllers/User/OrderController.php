@@ -120,7 +120,7 @@ class OrderController extends Controller
         $order->period = $request->input('period');
         $order->trade_no = Helper::generateOrderNo();
         $order->total_amount = $plan[$request->input('period')];
-
+        $order->redeem_code ='';
         if ($request->input('coupon_code')) {
             $couponService = new CouponService($request->input('coupon_code'));
             if (!$couponService->use($order)) {
