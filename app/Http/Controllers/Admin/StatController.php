@@ -1008,55 +1008,75 @@ public function getColumnChart(Request $request)
             'end_time' => 'nullable|integer'
         ]);
 
-        list($startTime, $endTime) = $this->getTimeRange(
-            $request->input('type'),
-            $request->input('start_time'),
-            $request->input('end_time')
-        );
+        // 使用开始和结束时间，确保结束时间是当天的23:59:59
+        $startTime = $request->input('start_time');
+        $endTime = $request->input('end_time') ? 
+            strtotime(date('Y-m-d 23:59:59', $request->input('end_time'))) : 
+            strtotime('today 23:59:59');
 
         $chartData = [];
-        $weekInterval = ($endTime - $startTime) / 7;
-        
-        // 根据传入的type选择对应的统计类型
-        $types = $this->getTypesByPeriod($request->input('type'));
+        // 计算总天数
+        $totalDays = ceil(($endTime - $startTime) / 86400);
+        // 根据总天数平均分成7段
+        $intervalDays = ceil($totalDays / 7);
+        $interval = $intervalDays * 86400;
+
+        \Log::info('查询参数:', [
+            'start_time' => date('Y-m-d H:i:s', $startTime),
+            'end_time' => date('Y-m-d H:i:s', $endTime),
+            'total_days' => $totalDays,
+            'interval_days' => $intervalDays
+        ]);
 
         for ($i = 0; $i < 7; $i++) {
-            $weekStart = $startTime + ($i * $weekInterval);
-            $weekEnd = $weekStart + $weekInterval;
-            $date = date('m-d', $weekStart);
+            $periodStart = $startTime + ($i * $interval);
+            $periodEnd = min($periodStart + $interval - 1, $endTime);
+            
+            if ($periodStart >= $endTime) break;
 
-            foreach ($types as $type) {
-                // 获取订单数据
-                $count = DB::table('v2_order')
-                    ->where('created_at', '>=', $weekStart)
-                    ->where('created_at', '<', $weekEnd)
-                    ->where('type', $type['type'])
-                    ->where('status', 3)
-                    ->where('period', 'like', $type['period'] . '%')
-                    ->count();
+            $date = date('m-d', $periodStart);
 
-                $chartData[] = [
-                    'type' => $type['name'],
-                    'date' => $date,
-                    'stack' => '订单',
-                    'value' => $count
-                ];
+            // 查询该时间段的订单数据
+            $periodOrders = DB::table('v2_order')
+                ->select(
+                    'type',
+                    'period',
+                    DB::raw('COUNT(*) as count'),
+                    DB::raw('SUM(total_amount) as amount')
+                )
+                ->where('created_at', '>=', $periodStart)
+                ->where('created_at', '<=', $periodEnd)
+                ->where('status', 3)
+                ->groupBy('type', 'period')
+                ->get();
 
-                // 获取金额数据
-                $amount = DB::table('v2_order')
-                    ->where('created_at', '>=', $weekStart)
-                    ->where('created_at', '<', $weekEnd)
-                    ->where('type', $type['type'])
-                    ->where('status', 3)
-                    ->where('period', 'like', $type['period'] . '%')
-                    ->sum('total_amount');
+            // 预设所有类型的默认值
+            $defaultTypes = [
+                'month_price' => ['新购' => 0, '续费' => 0],
+                'quarter_price' => ['新购' => 0, '续费' => 0],
+                'half_year_price' => ['新购' => 0, '续费' => 0],
+                'year_price' => ['新购' => 0, '续费' => 0]
+            ];
 
-                $chartData[] = [
-                    'type' => $type['name'] . '金额',
-                    'date' => $date,
-                    'stack' => '金额',
-                    'value' => round($amount / 100, 2)
-                ];
+            // 填充实际数据
+            foreach ($periodOrders as $order) {
+                $typeName = $order->type == 1 ? '新购' : '续费';
+                if (isset($defaultTypes[$order->period])) {
+                    $defaultTypes[$order->period][$typeName] = $order->count;
+                }
+            }
+
+            // 生成图表数据
+            foreach ($defaultTypes as $period => $types) {
+                $periodName = $this->getPeriodName($period);
+                foreach ($types as $type => $count) {
+                    $chartData[] = [
+                        'type' => $periodName . $type,
+                        'date' => $date,
+                        'stack' => '订单',
+                        'value' => $count
+                    ];
+                }
             }
         }
 
@@ -1072,14 +1092,26 @@ public function getColumnChart(Request $request)
 
     } catch (\Exception $e) {
         \Log::error('获取柱状图数据失败:', [
-            'message' => $e->getMessage(),
+            'error' => $e->getMessage(),
             'trace' => $e->getTraceAsString()
         ]);
-        
-        return response()->json([
-            'message' => '获取数据失败: ' . $e->getMessage()
-        ], 500);
+        throw $e;
     }
+}
+
+/**
+ * 获取周期名称
+ */
+private function getPeriodName($period) 
+{
+    $periodMap = [
+        'month_price' => '月',
+        'quarter_price' => '季',
+        'half_year_price' => '半年',
+        'year_price' => '年'
+    ];
+    
+    return $periodMap[$period] ?? '';
 }
 
 /**
