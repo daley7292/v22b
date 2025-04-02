@@ -1003,102 +1003,167 @@ public function getColumnChart(Request $request)
 {
     try {
         $request->validate([
-            'type' => 'required|in:day,week,month,quarter,half_year,year',
-            'start_time' => 'required|integer|min:0',  // 添加最小值验证
-            'end_time' => 'required|integer|min:0'     // 添加最小值验证
+            'type' => 'required|in:day,week,month,quarter,year,half_year',
+            'start_time' => 'required|integer|min:0',
+            'end_time' => 'required|integer|min:0'
         ]);
 
-        // 直接使用传入的时间戳
         $startTime = (int)$request->input('start_time');
         $endTime = (int)$request->input('end_time');
+        $type = $request->input('type');
 
-        \Log::info('请求参数:', [
-            'type' => $request->input('type'),
-            'start_time' => date('Y-m-d H:i:s', $startTime),
-            'end_time' => date('Y-m-d H:i:s', $endTime)
-        ]);
+        $processedData = null;
 
-        // 获取当前选择的周期对应的 period
-        $periodMap = [
-            'day' => 'day_price',
-            'week' => 'week_price',
-            'month' => 'month_price',
-            'quarter' => 'quarter_price',
-            'half_year' => 'half_year_price',
-            'year' => 'year_price'
-        ];
-
-        $currentPeriod = $periodMap[$request->input('type')];
-
-        $chartData = [];
-        $totalDays = ceil(($endTime - $startTime) / 86400);
-        $intervalDays = ceil($totalDays / 7);
-        $interval = $intervalDays * 86400;
-
-        \Log::info('时间计算:', [
-            'totalDays' => $totalDays,
-            'intervalDays' => $intervalDays,
-            'interval' => $interval
-        ]);
-
-        for ($i = 0; $i < 7; $i++) {
-            $periodStart = $startTime + ($i * $interval);
-            $periodEnd = min($periodStart + $interval - 1, $endTime);
+        switch ($type) {
+            case 'day':
+                $dayData = DB::table('v2_order')
+                    ->select(
+                        DB::raw('DATE(FROM_UNIXTIME(created_at)) as date'),
+                        'type',
+                        DB::raw('COUNT(*) as count'),
+                        DB::raw('SUM(total_amount) as amount')
+                    )
+                    ->where('created_at', '>=', $startTime)
+                    ->where('created_at', '<=', $endTime)
+                    ->where('status', 3)
+                    ->groupBy('date', 'type')
+                    ->orderBy('date')
+                    ->get();
             
-            if ($periodStart >= $endTime) break;
+                $processedData = $this->processChartData($dayData, function($data) {
+                    return date('m-d', strtotime($data->date));
+                });
+                break;
 
-            $date = date('m-d', $periodStart);
+            case 'week':
+                // 周统计代码保持不变
+                $weekData = DB::table('v2_order')
+                    ->select(
+                        DB::raw('YEARWEEK(FROM_UNIXTIME(created_at), 1) as yearweek'),
+                        DB::raw('YEAR(FROM_UNIXTIME(created_at)) as year'),
+                        DB::raw('WEEK(FROM_UNIXTIME(created_at), 1) as week'),
+                        'type',
+                        DB::raw('SUM(total_amount) as amount'),
+                        DB::raw('COUNT(*) as count')
+                    )
+                    ->where('created_at', '>=', $startTime)
+                    ->where('created_at', '<=', $endTime)
+                    ->where('status', 3)
+                    ->groupBy(
+                        DB::raw('YEARWEEK(FROM_UNIXTIME(created_at), 1)'),
+                        DB::raw('YEAR(FROM_UNIXTIME(created_at))'),
+                        DB::raw('WEEK(FROM_UNIXTIME(created_at), 1)'),
+                        'type'
+                    )
+                    ->orderBy('yearweek')
+                    ->get();
 
-            // 只查询当前周期的订单数据
-            $periodOrders = DB::table('v2_order')
-                ->select(
-                    'type',
-                    DB::raw('COUNT(*) as count'),
-                    DB::raw('SUM(total_amount) as amount')
-                )
-                ->where('created_at', '>=', $periodStart)
-                ->where('created_at', '<=', $periodEnd)
-                ->where('status', 3)
-                ->where('period', $currentPeriod)  
-                ->groupBy('type')
-                ->get();
+                $processedData = $this->processChartData($weekData, function($data) {
+                    return $data->year . '年第' . sprintf("%02d", $data->week) . '周';
+                });
+                break;
 
-            // 预设默认值
-            $defaultData = [
-                '新购' => ['count' => 0, 'amount' => 0],
-                '续费' => ['count' => 0, 'amount' => 0]
-            ];
+            case 'month':
+                $monthData = DB::table('v2_order')
+                    ->select(
+                        DB::raw('YEAR(FROM_UNIXTIME(created_at)) as year'),
+                        DB::raw('MONTH(FROM_UNIXTIME(created_at)) as month'),
+                        'type',
+                        DB::raw('COUNT(*) as count'),
+                        DB::raw('SUM(total_amount) as amount')
+                    )
+                    ->where('created_at', '>=', $startTime)
+                    ->where('created_at', '<=', $endTime)
+                    ->where('status', 3)
+                    ->groupBy(
+                        DB::raw('YEAR(FROM_UNIXTIME(created_at))'),
+                        DB::raw('MONTH(FROM_UNIXTIME(created_at))'),
+                        'type'
+                    )
+                    ->orderBy(DB::raw('YEAR(FROM_UNIXTIME(created_at))'))
+                    ->orderBy(DB::raw('MONTH(FROM_UNIXTIME(created_at))'))
+                    ->get();
 
-            // 填充实际数据
-            foreach ($periodOrders as $order) {
-                $typeName = $order->type == 1 ? '新购' : '续费';
-                $defaultData[$typeName]['count'] = $order->count;
-                $defaultData[$typeName]['amount'] = $order->amount;
-            }
+                $processedData = $this->processChartData($monthData, function($data) {
+                    return $data->year . '年' . $data->month . '月';
+                });
+                break;
 
-            // 生成图表数据
-            foreach ($defaultData as $type => $data) {
-                // 订单数据
-                $chartData[] = [
-                    'type' => $type,
-                    'date' => $date,
-                    'stack' => '订单',
-                    'value' => $data['count']
-                ];
-                
-                // 金额数据
-                $chartData[] = [
-                    'type' => $type . '金额',
-                    'date' => $date,
-                    'stack' => '金额',
-                    'value' => round($data['amount'] / 100, 2)
-                ];
-            }
+            case 'quarter':
+                $quarterData = DB::table('v2_order')
+                    ->select(
+                        DB::raw('YEAR(FROM_UNIXTIME(created_at)) as year'),
+                        DB::raw('QUARTER(FROM_UNIXTIME(created_at)) as quarter'),
+                        'type',
+                        DB::raw('COUNT(*) as count'),
+                        DB::raw('SUM(total_amount) as amount')
+                    )
+                    ->where('created_at', '>=', $startTime)
+                    ->where('created_at', '<=', $endTime)
+                    ->where('status', 3)
+                    ->groupBy('year', 'quarter', 'type')
+                    ->orderBy('year')
+                    ->orderBy('quarter')
+                    ->get();
+
+                $processedData = $this->processChartData($quarterData, function($data) {
+                    return $data->year . '年Q' . $data->quarter;
+                });
+                break;
+
+            case 'half_year':
+                $halfYearData = DB::table('v2_order')
+                    ->select(
+                        DB::raw('YEAR(FROM_UNIXTIME(created_at)) as year'),
+                        DB::raw('IF(MONTH(FROM_UNIXTIME(created_at)) <= 6, 1, 2) as half'),
+                        'type',
+                        DB::raw('COUNT(*) as count'),
+                        DB::raw('SUM(total_amount) as amount')
+                    )
+                    ->where('created_at', '>=', $startTime)
+                    ->where('created_at', '<=', $endTime)
+                    ->where('status', 3)
+                    ->groupBy('year', 'half', 'type')
+                    ->orderBy('year')
+                    ->orderBy('half')
+                    ->get();
+
+                $processedData = $this->processChartData($halfYearData, function($data) {
+                    return $data->year . '年' . ($data->half == 1 ? '上' : '下') . '半年';
+                });
+                break;
+
+            case 'year':
+                $yearData = DB::table('v2_order')
+                    ->select(
+                        DB::raw('YEAR(FROM_UNIXTIME(created_at)) as year'),
+                        'type',
+                        DB::raw('COUNT(*) as count'),
+                        DB::raw('SUM(total_amount) as amount')
+                    )
+                    ->where('created_at', '>=', $startTime)
+                    ->where('created_at', '<=', $endTime)
+                    ->where('status', 3)
+                    ->groupBy('year', 'type')
+                    ->orderBy('year')
+                    ->get();
+
+                $processedData = $this->processChartData($yearData, function($data) {
+                    return $data->year . '年';
+                });
+                break;
         }
 
         return [
             'data' => [
-                'chart_data' => $chartData,
+                'chart_data' => $processedData['chart_data'],
+                'time_range' => [
+                    'start_time' => date('Y-m-d', $startTime),
+                    'end_time' => date('Y-m-d', $endTime)
+                ]
+            ],
+            'renewal_rate' => [
+                'chart_data' => $processedData['renewal_rate'],
                 'time_range' => [
                     'start_time' => date('Y-m-d', $startTime),
                     'end_time' => date('Y-m-d', $endTime)
@@ -1181,6 +1246,90 @@ private function getIntervalByType($type)
         default:
             return 86400;
     }
+}
+
+/**
+ * 在类中添加一个新的辅助方法来处理和去重数据
+ */
+private function processChartData($rawData, $dateFormatter) 
+{
+    $processedData = [];
+    foreach ($rawData as $data) {
+        $date = $dateFormatter($data);
+        
+        if (!isset($processedData[$date])) {
+            $processedData[$date] = [
+                'new_order' => 0,
+                'new_amount' => 0,
+                'renew_order' => 0,
+                'renew_amount' => 0
+            ];
+        }
+
+        if ($data->type == 1) { // 新购
+            $processedData[$date]['new_order'] = $data->count;
+            $processedData[$date]['new_amount'] = $data->amount;
+        } else { // 续费
+            $processedData[$date]['renew_order'] = $data->count;
+            $processedData[$date]['renew_amount'] = $data->amount;
+        }
+    }
+
+    // 转换为前端需要的格式
+    $chartData = [];
+    $renewalRate = [];
+    foreach ($processedData as $date => $stats) {
+        // 新购订单数据
+        $chartData[] = [
+            'type' => '新购',
+            'date' => $date,
+            'stack' => '订单',
+            'value' => (int)$stats['new_order']
+        ];
+        
+        // 新购金额数据
+        $chartData[] = [
+            'type' => '新购金额',
+            'date' => $date,
+            'stack' => '金额',
+            'value' => round($stats['new_amount'] / 100, 2)
+        ];
+        
+        // 续费订单数据
+        $chartData[] = [
+            'type' => '续费',
+            'date' => $date,
+            'stack' => '订单',
+            'value' => (int)$stats['renew_order']
+        ];
+        
+        // 续费金额数据
+        $chartData[] = [
+            'type' => '续费金额',
+            'date' => $date,
+            'stack' => '金额',
+            'value' => round($stats['renew_amount'] / 100, 2)
+        ];
+
+        // 计算续费率
+        $rate = 0;
+        if ($stats['new_order'] > 0) {
+            $rate = round(($stats['renew_order'] / $stats['new_order']) * 100, 2);
+        }
+        
+        // 添加续费率数据
+        $renewalRate[] = [
+            'type' => '续费率',
+            'date' => $date,
+            'stack' => '比率',
+            'value' => $rate
+        ];
+    }
+
+    return [
+        'chart_data' => $chartData,
+        'renewal_rate' => $renewalRate
+    ];
 }
 
 }

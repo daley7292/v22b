@@ -509,6 +509,7 @@ class ApiController extends Controller
         if ($request->has('redeem_code')) {
             // 兑换码注册流程
             $redeemInfo = $this->validateRedeemCode($request->input('redeem_code'));
+            //var_dump($redeemInfo);exit;
             if (!$redeemInfo) {
                 abort(400, '您的兑换码有误');
             }
@@ -691,6 +692,78 @@ class ApiController extends Controller
             \Log::error('兑换码赠送订单异常:', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
+            ]);
+        }
+    }
+
+    /**
+     * 检查邮箱是否已存在
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function checkEmail(Request $request)
+    {
+        try {
+            // 验证请求参数
+            $validated = $request->validate([
+                'email' => 'required|email'
+            ], [
+                'email.required' => '邮箱地址不能为空',
+                'email.email' => '邮箱格式不正确'
+            ]);
+
+            $email = $request->input('email');
+
+            // 检查邮箱格式规则
+            if ((int)config('v2board.email_whitelist_enable', 0)) {
+                if (!Helper::emailSuffixVerify(
+                    $email,
+                    config('v2board.email_whitelist_suffix', Dict::EMAIL_WHITELIST_SUFFIX_DEFAULT))
+                ) {
+                    return response()->json([
+                        'code' => 500,
+                        'message' => '该邮箱后缀不在白名单内'
+                    ]);
+                }
+            }
+
+            // 检查 Gmail 别名限制
+            if ((int)config('v2board.email_gmail_limit_enable', 0)) {
+                $prefix = explode('@', $email)[0];
+                if (strpos($prefix, '.') !== false || strpos($prefix, '+') !== false) {
+                    return response()->json([
+                        'code' => 500,
+                        'message' => '不支持 Gmail 别名'
+                    ]);
+                }
+            }
+
+            // 检查邮箱是否已存在
+            $exists = User::where('email', $email)->exists();
+
+            return response()->json([
+                'code' => $exists ? 500 : 200,
+                'message' => $exists ? '该邮箱已被注册' : '该邮箱可以使用',
+                'data' => [
+                    'email' => $email,
+                    'exists' => $exists
+                ]
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'code' => 422,
+                'message' => $e->validator->errors()->first(),
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('检查邮箱异常:', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'code' => 500,
+                'message' => '服务器错误:' . $e->getMessage()
             ]);
         }
     }
