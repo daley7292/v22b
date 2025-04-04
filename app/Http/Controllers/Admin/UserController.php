@@ -35,6 +35,16 @@ class UserController extends Controller
         $filters = $request->input('filter');
         if ($filters) {
             foreach ($filters as $k => $filter) {
+                // 特殊处理 expire_days
+                if ($filter['key'] === 'expire_days') {
+                    $expireDays = (int)$filter['value'];
+                    $targetTimestamp = strtotime("+{$expireDays} days");
+                    $builder->where('expired_at', '<=', $targetTimestamp)
+                           ->where('expired_at', '>', 0); // 排除无限期用户
+                    continue;
+                }
+                
+                // 处理其他条件
                 if ($filter['condition'] === '模糊') {
                     $filter['condition'] = 'like';
                     $filter['value'] = "%{$filter['value']}%";
@@ -49,7 +59,11 @@ class UserController extends Controller
                     unset($filters[$k]);
                     continue;
                 }
-                $builder->where($filter['key'], $filter['condition'], $filter['value']);
+                
+                // 处理常规字段
+                if ($filter['key'] !== 'expire_days') {
+                    $builder->where($filter['key'], $filter['condition'], $filter['value']);
+                }
             }
         }
     }
@@ -338,7 +352,6 @@ class UserController extends Controller
 
         // 处理输入参数，确保为数组格式
         $userIds = is_array($request->input('ids')) ? $request->input('ids') : [$request->input('ids')];
-
         try {
             DB::beginTransaction();
             
@@ -349,7 +362,6 @@ class UserController extends Controller
                         ->orWhere('expired_at', 0);
                 })
                 ->get();
-            
             if ($users->isEmpty()) {
                 throw new \Exception('未找到符合删除条件的用户（用户不存在或未到期）');
             }
