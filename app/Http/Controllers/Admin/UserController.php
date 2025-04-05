@@ -40,7 +40,14 @@ class UserController extends Controller
                     $expireDays = (int)$filter['value'];
                     $targetTimestamp = strtotime("+{$expireDays} days");
                     $builder->where('expired_at', '<=', $targetTimestamp)
-                           ->where('expired_at', '>', 0); // 排除无限期用户
+                           ->where('expired_at', '>', 0);
+                    continue;
+                }
+                
+                // 处理余额和佣金字段
+                if ($filter['key'] === 'balance' || $filter['key'] === 'commission_balance') {
+                    $value = (float)$filter['value'] * 100; // 转换为分
+                    $builder->where($filter['key'], $filter['condition'], $value);
                     continue;
                 }
                 
