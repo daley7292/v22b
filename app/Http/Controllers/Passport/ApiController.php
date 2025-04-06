@@ -387,8 +387,9 @@ class ApiController extends Controller
         $this->handleInviteCode($request, $user);
         
         // 处理试用计划
-        $this->handleTryOutPlan($user);
+       //$this->handleTryOutPlan($user);
 
+    
         if (!$user->save()) {
             abort(500, __('Register failed'));
         }
@@ -470,34 +471,65 @@ class ApiController extends Controller
             $order->save();
 
             // 计算并更新有效期
-            $this->updateInviterExpiry($inviter, $plan);
+            $this->updateInviterExpiry($inviter,$plan,$order);
         });
     }
 
     /**
      * 更新邀请人的有效期
      */
-    private function updateInviterExpiry(User $inviter, Plan $newPlan)
+    private function updateInviterExpiry(User $inviter, Plan $newPlan, Order $order)
     {
-        $currentPlan = Plan::find($inviter->plan_id);
-        if (!$currentPlan || $currentPlan->month_price <= 0 || $newPlan->month_price <= 0) {
-            return;
-        }
 
-        $hoursInMonth = 720;
-        $currentHourlyPrice = ($currentPlan->month_price / 100) / $hoursInMonth;
-        $complimentaryHourlyPrice = ($newPlan->month_price / 100) / $hoursInMonth;
-        
-        $equivalentComplimentaryHours = $complimentaryHourlyPrice / $currentHourlyPrice * $hoursInMonth;
-        $configComplimentaryHours = (int)config('v2board.complimentary_package_duration');
-        $totalComplimentaryHours = $equivalentComplimentaryHours + $configComplimentaryHours;
-        
-        $currentTimestamp = time();
-        $remainingHours = floor(($inviter->expired_at - $currentTimestamp) / 3600);
-        $totalHours = $remainingHours + $totalComplimentaryHours;
-        
-        $inviter->expired_at = $currentTimestamp + floor($totalHours * 3600);
-        $inviter->save();
+        try {
+            $currentPlan = Plan::find($inviter->plan_id);
+            if (!$currentPlan || $currentPlan->month_price <= 0 || $newPlan->month_price <= 0) {
+                return;
+            }
+    
+            // 计算每小时价格
+            $hoursInMonth = 720; // 30天 * 24小时
+            $currentHourlyPrice = ($currentPlan->month_price / 100) / $hoursInMonth;
+            $complimentaryHourlyPrice = ($newPlan->month_price / 100) / $hoursInMonth;
+            
+            // 计算赠送时长
+            $equivalentComplimentaryHours = $complimentaryHourlyPrice / $currentHourlyPrice * $hoursInMonth;
+            $configComplimentaryHours = (int)config('v2board.complimentary_package_duration');
+            $totalComplimentaryHours = $equivalentComplimentaryHours + $configComplimentaryHours;
+            
+            // 计算总赠送天数（保留两位小数）
+            $giftDays = round($totalComplimentaryHours / 24, 2);
+            // 计算新的到期时间
+            $currentTimestamp = time();
+            $remainingHours = floor(($inviter->expired_at - $currentTimestamp) / 3600);
+            if ($remainingHours < 0) {
+                $remainingHours = 0; // 如果已过期，从当前时间开始计算
+            }
+            $totalHours = $remainingHours + $totalComplimentaryHours;
+            
+            // 更新邀请人到期时间
+            $inviter->expired_at = $currentTimestamp + floor($totalHours * 3600);
+            $inviter->save();
+    
+            // 更新订单的赠送天数字段
+            $order->gift_days = $giftDays;
+            $order->save();
+            // 记录日志
+            \Log::info('邀请赠送更新成功', [
+                'inviter_id' => $inviter->id,
+                'gift_days' => $giftDays,
+                'old_expired_at' => date('Y-m-d H:i:s', $currentTimestamp + ($remainingHours * 3600)),
+                'new_expired_at' => date('Y-m-d H:i:s', $inviter->expired_at)
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('邀请赠送更新失败', [
+                'error' => $e->getMessage(),
+                'inviter_id' => $inviter->id,
+                'order_id' => $order->id
+            ]);
+            throw $e;
+        }
     }
 
     /**
@@ -559,17 +591,32 @@ class ApiController extends Controller
         if ($request->has('redeem_code')) {
             // 兑换码注册 - 使用兑换码对应的套餐
             $this->handleRedeemPlan($user, $redeemInfo);
-        } elseif ($request->has('invite_code')) {
-            // 推广码注册 - 使用试用计划并处理推广赠送
-            $this->handleTryOutPlan($user);
-            //$this->handleInvitePresent($user);  //取消赠送逻辑
-        } else {
-            // 普通注册 - 仅使用试用计划
-            $this->handleTryOutPlan($user);
-        }
+            return response()->json([
+                'data' => $authService->generateAuthData($request)
+            ]);
+        } 
+        
+        $this->handleTryOutPlan($user);
+        //$this->handleInvitePresent($user);  //取消赠送逻辑
 
         // 9. 生成认证数据并返回
         $authService = new AuthService($user);
+        // 10. 处理订单记录
+        $tryOutHours = (int)config('v2board.try_out_hour', 1);
+        $plan = Plan::find(config('v2board.try_out_plan_id'));
+        $giftDays = round($tryOutHours / 24, 2); // 保留两位小数
+        $order = new Order();
+        $order->user_id = $user->id;
+        $order->plan_id = $plan->id;
+        $order->period = 'try_out';  // 修改这里，固定使用 try_out
+        $order->trade_no = Helper::guid();
+        $order->total_amount = 0; // 赠送订单金额为0
+        $order->status = 3; // 已完成状态
+        $order->type = 4; // 赠送类型
+        $order->gift_days = $giftDays; // 赠送天数
+        $order->redeem_code = ''; // 添加空字符串作为默认值
+        $order->save();
+
         return response()->json([
             'data' => $authService->generateAuthData($request)
         ]);
@@ -631,7 +678,7 @@ class ApiController extends Controller
         if (!$plan) {
             return;
         }
-
+    
         // 设置用户套餐信息
         $user->transfer_enable = $plan->transfer_enable * 1073741824;
         $user->plan_id = $plan->id;
@@ -640,32 +687,36 @@ class ApiController extends Controller
         // 计算到期时间和订单周期
         $duration = 0;
         $orderPeriod = '';
-        
+        $days = 0; // 用于计算赠送天数
         switch ($redeemInfo['duration_unit']) {
             case 'month':
                 $duration = $redeemInfo['duration_value'] * 30 * 86400;
                 $orderPeriod = 'month_price';
+                $days = $redeemInfo['duration_value'] * 30;
                 break;
             case 'quarter':
                 $duration = $redeemInfo['duration_value'] * 90 * 86400;
                 $orderPeriod = 'quarter_price';
+                $days = $redeemInfo['duration_value'] * 90;
                 break;
             case 'half_year':
                 $duration = $redeemInfo['duration_value'] * 180 * 86400;
                 $orderPeriod = 'half_year_price';
+                $days = $redeemInfo['duration_value'] * 180;
                 break;
             case 'year':
                 $duration = $redeemInfo['duration_value'] * 365 * 86400;
                 $orderPeriod = 'year_price';
+                $days = $redeemInfo['duration_value'] * 365;
                 break;
             default:
                 $duration = $redeemInfo['duration_value'] * 86400;
                 $orderPeriod = 'month_price'; // 默认按月
+                $days = $redeemInfo['duration_value'] * 30;
         }
-        
         $user->expired_at = time() + $duration;
         $user->save();
-
+        $giftDays = round($days, 2); // 保留两位小数
         // 创建赠送订单记录
         try {
             $order = new Order();
@@ -679,7 +730,7 @@ class ApiController extends Controller
             $order->status = 3; // 已完成状态
             $order->type = 4; // 赠送类型
             $order->redeem_code = $redeemInfo['redeem_code']; // 记录兑换码
-            
+            $order->gift_days = $giftDays; // 赠送天数
             // 保存订单
             if (!$order->save()) {
                 \Log::error('兑换码赠送订单创建失败:', [

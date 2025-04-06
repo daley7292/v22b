@@ -21,8 +21,6 @@ use App\Utils\Dict;
 use App\Utils\CacheKey;
 use ReCaptcha\ReCaptcha;
 
-
-
 class AuthController extends Controller
 {
     public function loginWithMailLink(Request $request)
@@ -51,7 +49,6 @@ class AuthController extends Controller
         Cache::put($key, $user->id, 300);
         Cache::put(CacheKey::get('LAST_SEND_LOGIN_WITH_MAIL_LINK_TIMESTAMP', $params['email']), time(), 60);
 
-
         $redirect = '/#/login?verify=' . $code . '&redirect=' . ($request->input('redirect') ? $request->input('redirect') : 'dashboard');
         if (config('v2board.app_url')) {
             $link = config('v2board.app_url') . $redirect;
@@ -75,12 +72,10 @@ class AuthController extends Controller
         return response([
             'data' => $link
         ]);
-
     }
 
     public function register(AuthRegister $request)
     {
-
         if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
             $registerCountByIP = Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip())) ?? 0;
             if ((int)$registerCountByIP >= (int)config('v2board.register_limit_count', 3)) {
@@ -165,6 +160,14 @@ class AuthController extends Controller
                 $user->expired_at = time() + (config('v2board.try_out_hour', 1) * 3600);
                 $user->speed_limit = $plan->speed_limit;
             }
+        } else {
+            // 如果未开启试用，设置默认值
+            $user->transfer_enable = 0;
+            $user->plan_id = 0;
+            $user->group_id = 0;
+            $user->expired_at = 0;
+            $user->speed_limit = 0;
+            $user->is_admin=0;
         }
 
         if (!$user->save()) {
@@ -186,76 +189,84 @@ class AuthController extends Controller
         }
 
         $authService = new AuthService($user);
-
+        
         //新增邀请判断 这里写赠送套餐逻辑 这里处理邀请着套餐赠送问题
         if ((int)config('v2board.invite_force_present')==1) {
             $plan = Plan::find((int)config('v2board.complimentary_packages'));
 
-            //$user->invite_user_id;
-            if ($plan) {
-                // 判断用户是否以及有套餐
-                //获取全局试用套餐和用户是否一致，不一致则出发赠送条件
+            if ($plan && $user->invite_user_id) {  // 添加邀请用户ID检查
                 $user_data = User::where('id', $user->invite_user_id)->first();
-                if ((int)config('v2board.try_out_plan_id') != $user_data->plan_id) {
-                    DB::beginTransaction();
-                    $order = new Order();
-                    $orderService = new OrderService($order);
-                    $order->user_id = $user->invite_user_id;
-                    $order->plan_id = $plan->id;
-                    $order->period = 'month_price';
-                    $order->trade_no = Helper::guid();
-                    $order->total_amount = 0;
-                    $order->status = 3;
-                    $order->type = 6;
-                    $orderService->setInvite($user);
-                    if (!$order->save()) {
+                
+                if ($user_data) {  // 添加用户存在性检查
+                    // 检查试用计划ID是否存在且不等于当前用户计划ID
+                    if (!$user_data->plan_id || (int)config('v2board.try_out_plan_id') != $user_data->plan_id) {
+                        DB::beginTransaction();
+                        try {
+                            $order = new Order();
+                            $orderService = new OrderService($order);
+                            $order->user_id = $user->invite_user_id;
+                            $order->plan_id = $plan->id;
+                            $order->period = 'month_price';
+                            $order->trade_no = Helper::guid();
+                            $order->total_amount = 0;
+                            $order->status = 3;
+                            $order->type = 6;
+                            $orderService->setInvite($user);
+                            
+                            if (!$order->save()) {
+                                throw new \Exception('邀请赠送订单保存失败');
+                            }
+                            
+                            $expired_at = $user_data->expired_at;    //当前上游客户的到期时间
+                            $Plan1 = Plan::find($user_data->plan_id); //获取上游用户当前的套餐
+                            $new_Plan = Plan::find((int)config('v2board.complimentary_packages'));//准备赠送套餐详细信息
+                            if ($Plan1 && $new_Plan) {
+                                // 确保当前套餐和赠送套餐的价格大于零
+                                if ($Plan1->month_price > 0 && $new_Plan->month_price > 0) {
 
-                        DB::rollback();
-                    }
-                    DB::commit();
-                    $expired_at = $user_data->expired_at;    //当前上游客户的到期时间
-                    $Plan1 = Plan::find($user_data->plan_id); //获取上游用户当前的套餐
-                    $new_Plan = Plan::find((int)config('v2board.complimentary_packages'));//准备赠送套餐详细信息
-                    if ($Plan1 && $new_Plan) {
-                        // 确保当前套餐和赠送套餐的价格大于零
-                        if ($Plan1->month_price > 0 && $new_Plan->month_price > 0) {
+                                    // 假设一个月有720小时（30天 * 24小时）
+                                    $hoursInMonth = 720;
 
-                            // 假设一个月有720小时（30天 * 24小时）
-                            $hoursInMonth = 720;
+                                    // 计算当前套餐的每小时价格（分转换为元）
+                                    $currentHourlyPrice = ($Plan1->month_price / 100) / $hoursInMonth;
 
-                            // 计算当前套餐的每小时价格（分转换为元）
-                            $currentHourlyPrice = ($Plan1->month_price / 100) / $hoursInMonth;
+                                    // 计算赠送套餐的每小时价格（分转换为元）
+                                    $complimentaryHourlyPrice = ($new_Plan->month_price / 100) / $hoursInMonth;
 
-                            // 计算赠送套餐的每小时价格（分转换为元）
-                            $complimentaryHourlyPrice = ($new_Plan->month_price / 100) / $hoursInMonth;
+                                    // 计算赠送套餐在当前套餐价格下的等效小时数
+                                    $equivalentComplimentaryHours = $complimentaryHourlyPrice / $currentHourlyPrice * $hoursInMonth;
 
-                            // 计算赠送套餐在当前套餐价格下的等效小时数
-                            $equivalentComplimentaryHours = $complimentaryHourlyPrice / $currentHourlyPrice * $hoursInMonth;
+                                    // 获取配置项中的额外赠送小时数
+                                    $configComplimentaryHours = (int)config('v2board.complimentary_package_duration');
 
-                            // 获取配置项中的额外赠送小时数
-                            $configComplimentaryHours = (int)config('v2board.complimentary_package_duration');
+                                    // 计算总的赠送小时数
+                                    $totalComplimentaryHours = $equivalentComplimentaryHours + $configComplimentaryHours;
 
-                            // 计算总的赠送小时数
-                            $totalComplimentaryHours = $equivalentComplimentaryHours + $configComplimentaryHours;
+                                    // 获取当前时间戳
+                                    $currentTimestamp = time();
 
-                            // 获取当前时间戳
-                            $currentTimestamp = time();
+                                    // 计算当前套餐的剩余小时数
+                                    $remainingHours = floor(($expired_at - $currentTimestamp) / 3600);
 
-                            // 计算当前套餐的剩余小时数
-                            $remainingHours = floor(($expired_at - $currentTimestamp) / 3600);
+                                    // 计算总小时数
+                                    $totalHours = $remainingHours + $totalComplimentaryHours;
 
-                            // 计算总小时数
-                            $totalHours = $remainingHours + $totalComplimentaryHours;
+                                    // 更新用户的到期时间
+                                    $newExpirationTimestamp = $currentTimestamp + floor($totalHours * 3600);
+                                    $user_data->expired_at = $newExpirationTimestamp;
+                                    $user_data->save();
+                                }
+                            }
 
-                            // 更新用户的到期时间
-                            $newExpirationTimestamp = $currentTimestamp + floor($totalHours * 3600);
-                            $user_data->expired_at = $newExpirationTimestamp;
-                            $user_data->save();
+                            DB::commit();
+                        } catch (\Exception $e) {
+                            DB::rollback();
+                            \Log::error('邀请赠送处理失败：' . $e->getMessage());
                         }
                     }
-
+                } else {
+                    \Log::warning('邀请用户不存在，用户ID：' . $user->invite_user_id);
                 }
-
             }
         }
         return response()->json([
