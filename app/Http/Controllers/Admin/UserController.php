@@ -35,6 +35,7 @@ class UserController extends Controller
         $filters = $request->input('filter');
         if ($filters) {
             foreach ($filters as $k => $filter) {
+
                 // 特殊处理 expire_days
                 if ($filter['key'] === 'expire_days') {
                     $expireDays = (int)$filter['value'];
@@ -56,17 +57,37 @@ class UserController extends Controller
                     $filter['condition'] = 'like';
                     $filter['value'] = "%{$filter['value']}%";
                 }
+                if ($filter['condition'] === '为空') {
+                    $filter['condition'] = 'like';
+                    $filter['value'] = "%{$filter['value']}%";
+                }
                 if ($filter['key'] === 'd' || $filter['key'] === 'transfer_enable') {
                     $filter['value'] = $filter['value'] * 1073741824;
                 }
+
                 if ($filter['key'] === 'invite_by_email') {
-                    $user = User::where('email', $filter['condition'], $filter['value'])->first();
-                    $inviteUserId = isset($user->id) ? $user->id : 0;
-                    $builder->where('invite_user_id', $inviteUserId);
-                    unset($filters[$k]);
-                    continue;
+                    //var_dump($filter['value']);exit;
+                    $value = trim($filter['value'], '%');
+                    if ($value == -1) {
+                        // 查询非空邀请用户
+                        $builder->where('invite_user_id', '>', 0);
+                        continue;
+                    } else if ($value == -2) {
+                        // 查询无邀请用户
+                        $builder->where(function($query) {
+                            $query->whereNull('invite_user_id')
+                                  ->orWhere('invite_user_id', 0);  // 如果有使用0表示无邀请
+                        });
+                        continue;
+                    } else {
+                        // 按邮箱查询邀请人
+                        $user = User::where('email', $filter['condition'], $filter['value'])->first();
+                        $inviteUserId = isset($user->id) ? $user->id : 0;
+                        $builder->where('invite_user_id', $inviteUserId);
+                        unset($filters[$k]);
+                        continue;
+                    }
                 }
-                
                 // 处理常规字段
                 if ($filter['key'] !== 'expire_days') {
                     $builder->where($filter['key'], $filter['condition'], $filter['value']);
@@ -74,7 +95,6 @@ class UserController extends Controller
             }
         }
     }
-
     public function fetch(UserFetch $request)
     {
         $current = $request->input('current') ? $request->input('current') : 1;
