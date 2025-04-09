@@ -56,8 +56,9 @@ class PaymentService
                     ]);
                 }
             }
-            return $result;
+            
         }
+        return $result;
     }
 
     public function pay($order)
