@@ -457,6 +457,14 @@ class ApiController extends Controller
         }
 
         DB::transaction(function () use ($user, $plan, $inviter) {
+
+            if ($inviter->has_received_inviter_reward) {
+                \Log::info('邀请人已获得过该用户的奖励', [
+                    'inviter_id' => $inviter->id,
+                    'user_id' => $user->id
+                ]);
+                return;
+            }
             // 创建赠送订单
             $order = new Order();
             $orderService = new OrderService($order);
@@ -469,6 +477,8 @@ class ApiController extends Controller
             $order->type = 6;
             $orderService->setInvite($user);
             $order->save();
+            // 更新邀请人信息
+            $inviter->has_received_inviter_reward = 1; // 标记已获得邀请奖励
 
             // 计算并更新有效期
             $this->updateInviterExpiry($inviter,$plan,$order);
@@ -824,5 +834,92 @@ class ApiController extends Controller
                 'message' => '服务器错误:' . $e->getMessage()
             ]);
         }
+    }
+
+    /**
+     * 处理首次付费邀请奖励
+     */
+    private function handleFirstOrderReward(Order $order)
+    {
+       
+            // 1. 获取订单用户和其邀请人
+            $user = User::find($order->user_id);
+            if (!$user || !$user->invite_user_id) {
+                \Log::info('用户不存在或无邀请人', [
+                    'order_id' => $order->id,
+                    'user_id' => $order->user_id
+                ]);
+                return;
+            }
+
+            // 2. 获取邀请人信息
+            $inviter = User::find($user->invite_user_id);
+            if (!$inviter) {
+                \Log::info('邀请人不存在', [
+                    'user_id' => $user->id,
+                    'invite_user_id' => $user->invite_user_id
+                ]);
+                return;
+            }
+
+            // 3. 检查是否是首次付费订单
+            $hasOtherPaidOrders = Order::where('user_id', $user->id)
+                ->where('id', '!=', $order->id)
+                ->where('status', 3) // 已支付
+                ->where('type', '!=', 4) // 非赠送订单
+                ->exists();
+                
+            if ($hasOtherPaidOrders) {
+                \Log::info('非首次付费订单，不触发邀请奖励', [
+                    'user_id' => $user->id,
+                    'order_id' => $order->id
+                ]);
+                return;
+            }
+
+            // 4. 检查邀请人是否已获得该用户的奖励
+            if ($inviter->has_received_inviter_reward) {
+                \Log::info('邀请人已获得过该用户的奖励', [
+                    'inviter_id' => $inviter->id,
+                    'user_id' => $user->id
+                ]);
+                return;
+            }
+
+            // 5. 处理邀请奖励
+            DB::transaction(function () use ($user, $inviter, $order) {
+                $plan = Plan::find((int)config('v2board.complimentary_packages'));
+                if (!$plan) {
+                    \Log::error('赠送套餐不存在');
+                    return;
+                }
+
+                // 创建赠送订单
+                $rewardOrder = new Order();
+                $orderService = new OrderService($rewardOrder);
+                $rewardOrder->user_id = $inviter->id;
+                $rewardOrder->plan_id = $plan->id;
+                $rewardOrder->period = 'month_price';
+                $rewardOrder->trade_no = Helper::guid();
+                $rewardOrder->total_amount = 0;
+                $rewardOrder->status = 3;
+                $rewardOrder->type = 6; // 首单奖励类型
+                $rewardOrder->invited_user_id = $user->id; // 记录来源用户
+                $orderService->setInvite($user);
+                $rewardOrder->save();
+
+                // 标记邀请人已获得该用户的奖励
+                $inviter->has_received_inviter_reward = 1;
+                $inviter->save();
+
+                // 更新邀请人有效期
+                $this->updateInviterExpiry($inviter, $plan, $rewardOrder);
+
+                \Log::info('首次付费邀请奖励发放成功', [
+                    'user_id' => $user->id,
+                    'inviter_id' => $inviter->id,
+                    'order_id' => $rewardOrder->id
+                ]);
+            });
     }
 }

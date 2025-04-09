@@ -44,7 +44,9 @@ class PaymentService
                     $inviteGiveType = (int)config('v2board.is_Invitation_to_give', 0);
                     // 模式2和模式3都需要处理订单支付后的赠送
                     if ($inviteGiveType === 2 || $inviteGiveType === 3) {
-                        app(\App\Http\Controllers\Admin\OrderController::class)->handleFirstOrderReward($order);
+                        // 移除内部 try-catch，让外层统一处理
+                        app(\App\Http\Controllers\Passport\ApiController::class)
+                            ->handleFirstOrderReward($order);
                     }
                 } catch(\Exception $e) {
                     \Log::error('处理首单邀请奖励失败', [
@@ -52,7 +54,6 @@ class PaymentService
                         'order_id' => $order->id,
                         'trade_no' => $order->trade_no
                     ]);
-                    return $result;
                 }
             }
             return $result;
