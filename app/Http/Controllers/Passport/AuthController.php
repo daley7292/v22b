@@ -76,6 +76,38 @@ class AuthController extends Controller
 
     public function register(AuthRegister $request)
     {
+        // 1. 验证注册限制
+        $this->validateRegistrationRestrictions($request);
+        
+        // 2. 创建用户
+        $user = $this->createUser($request);
+        
+        // 3. 处理邀请码
+        if ($request->input('invite_code')) {
+            $this->handleInviteCode($request, $user);
+        }
+        
+        // 4. 处理试用计划
+        $this->handleTrialPlan($user);
+        
+        // 5. 保存用户并处理后续操作
+        if (!$user->save()) {
+            abort(500, __('Register failed'));
+        }
+        
+        // 6. 清理验证码和更新登录时间
+        $this->handlePostRegistration($request, $user);
+        
+        // 7. 返回认证数据
+        $authService = new AuthService($user);
+        return response()->json([
+            'data' => $authService->generateAuthData($request)
+        ]);
+    }
+
+    private function validateRegistrationRestrictions(Request $request)
+    {
+        // IP限制检查
         if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
             $registerCountByIP = Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip())) ?? 0;
             if ((int)$registerCountByIP >= (int)config('v2board.register_limit_count', 3)) {
@@ -84,6 +116,8 @@ class AuthController extends Controller
                 ]));
             }
         }
+
+        // reCAPTCHA验证
         if ((int)config('v2board.recaptcha_enable', 0)) {
             $recaptcha = new ReCaptcha(config('v2board.recaptcha_key'));
             $recaptchaResp = $recaptcha->verify($request->input('recaptcha_data'));
@@ -91,6 +125,8 @@ class AuthController extends Controller
                 abort(500, __('Invalid code is incorrect'));
             }
         }
+
+        // 邮箱白名单检查
         if ((int)config('v2board.email_whitelist_enable', 0)) {
             if (!Helper::emailSuffixVerify(
                 $request->input('email'),
@@ -99,20 +135,26 @@ class AuthController extends Controller
                 abort(500, __('Email suffix is not in the Whitelist'));
             }
         }
+
+        // Gmail别名限制
         if ((int)config('v2board.email_gmail_limit_enable', 0)) {
             $prefix = explode('@', $request->input('email'))[0];
             if (strpos($prefix, '.') !== false || strpos($prefix, '+') !== false) {
                 abort(500, __('Gmail alias is not supported'));
             }
         }
+
+        // 注册开关检查
         if ((int)config('v2board.stop_register', 0)) {
             abort(500, __('Registration has closed'));
         }
-        if ((int)config('v2board.invite_force', 0)) {
-            if (empty($request->input('invite_code'))) {
-                abort(500, __('You must use the invitation code to register'));
-            }
+
+        // 强制邀请码检查
+        if ((int)config('v2board.invite_force', 0) && empty($request->input('invite_code'))) {
+            abort(500, __('You must use the invitation code to register'));
         }
+
+        // 邮箱验证码检查
         if ((int)config('v2board.email_verify', 0)) {
             if (empty($request->input('email_code'))) {
                 abort(500, __('Email verification code cannot be empty'));
@@ -121,36 +163,116 @@ class AuthController extends Controller
                 abort(500, __('Incorrect email verification code'));
             }
         }
+    }
 
+    private function createUser(Request $request)
+    {
+        // 检查邮箱是否已存在
         $email = $request->input('email');
-        $password = $request->input('password');
-        $exist = User::where('email', $email)->first();
-        if ($exist) {
+        if (User::where('email', $email)->exists()) {
             abort(500, __('Email already exists'));
         }
+
+        // 创建新用户
         $user = new User();
         $user->email = $email;
-        $user->password = password_hash($password, PASSWORD_DEFAULT);
+        $user->password = password_hash($request->input('password'), PASSWORD_DEFAULT);
         $user->uuid = Helper::guid(true);
         $user->token = Helper::guid();
-        if ($request->input('invite_code')) {
-            $inviteCode = InviteCode::where('code', $request->input('invite_code'))
-                ->where('status', 0)
-                ->first();
-            if (!$inviteCode) {
-                if ((int)config('v2board.invite_force', 0)) {
-                    abort(500, __('Invalid invitation code'));
-                }
-            } else {
-                $user->invite_user_id = $inviteCode->user_id ? $inviteCode->user_id : null;
-                if (!(int)config('v2board.invite_never_expire', 0)) {
-                    $inviteCode->status = 1;
-                    $inviteCode->save();
-                }
+        // 添加默认值设置
+        $user->is_admin = 0;
+        $user->is_staff = 0;
+        $user->last_login_at = time();
+        $user->created_at = time();
+        return $user;
+    }
+
+    private function handleInviteCode(Request $request, User $user)
+    {
+        $inviteCode = InviteCode::where('code', $request->input('invite_code'))
+            ->where('status', 0)
+            ->first();
+
+        if (!$inviteCode) {
+            if ((int)config('v2board.invite_force', 0)) {
+                abort(500, __('Invalid invitation code'));
             }
+            return;
         }
 
-        // try out
+        // 设置邀请关系
+        $user->invite_user_id = $inviteCode->user_id;
+        if (!(int)config('v2board.invite_never_expire', 0)) {
+            $inviteCode->status = 1;
+            $inviteCode->save();
+        }
+
+        // 处理邀请奖励
+        $inviteGiveType = (int)config('v2board.is_Invitation_to_give', 0);
+        if ($inviteGiveType === 1 || $inviteGiveType === 3) {
+            $this->handleInviteReward($user);
+        }
+    }
+
+    private function handleInviteReward(User $user)
+    {
+        try {
+            $inviter = User::find($user->invite_user_id);
+            if (!$inviter || (int)config('v2board.try_out_plan_id') == $inviter->plan_id) {
+                return;
+            }
+
+            $plan = Plan::find((int)config('v2board.complimentary_packages'));
+            if (!$plan) {
+                return;
+            }
+
+            DB::transaction(function () use ($user, $plan, $inviter) {
+                // 创建赠送订单
+                $order = new Order();
+                $orderService = new OrderService($order);
+                $order->user_id = $inviter->id;
+                $order->plan_id = $plan->id;
+                $order->period = 'month_price';
+                $order->trade_no = Helper::guid();
+                $order->total_amount = 0;
+                $order->status = 3;
+                $order->type = 6;
+                $order->invited_user_id = $user->id;
+                $orderService->setInvite($user);
+                $order->save();
+
+                // 更新邀请人状态
+                $inviter->has_received_inviter_reward = 1;
+                $inviter->save();
+
+                // 更新到期时间
+                $currentTime = time();
+                if ($inviter->expired_at === null || $inviter->expired_at < $currentTime) {
+                    $inviter->expired_at = $currentTime;
+                }
+                $add_seconds = (int)config('v2board.complimentary_package_duration', 1) * 86400;
+                $inviter->expired_at = $inviter->expired_at + $add_seconds;
+                $inviter->save();
+
+                \Log::info('注册邀请奖励发放成功', [
+                    'user_id' => $user->id,
+                    'inviter_id' => $inviter->id,
+                    'order_id' => $order->id
+                ]);
+            });
+        } catch (\Exception $e) {
+            \Log::error('处理邀请奖励失败', [
+                'error' => $e->getMessage(),
+                'user_id' => $user->id,
+                'inviter_id' => $user->invite_user_id,
+                'trace' => $e->getTraceAsString()
+            ]);
+        }
+    }
+
+    private function handleTrialPlan(User $user)
+    {
         if ((int)config('v2board.try_out_plan_id', 0)) {
             $plan = Plan::find(config('v2board.try_out_plan_id'));
             if ($plan) {
@@ -161,117 +283,35 @@ class AuthController extends Controller
                 $user->speed_limit = $plan->speed_limit;
             }
         } else {
-            // 如果未开启试用，设置默认值
             $user->transfer_enable = 0;
             $user->plan_id = 0;
             $user->group_id = 0;
             $user->expired_at = 0;
             $user->speed_limit = 0;
-            $user->is_admin=0;
+            $user->is_admin = 0;
         }
+    }
 
-        if (!$user->save()) {
-            abort(500, __('Register failed'));
-        }
+    private function handlePostRegistration(Request $request, User $user)
+    {
+        // 清理邮箱验证码缓存
         if ((int)config('v2board.email_verify', 0)) {
             Cache::forget(CacheKey::get('EMAIL_VERIFY_CODE', $request->input('email')));
         }
 
+        // 更新登录时间
         $user->last_login_at = time();
         $user->save();
 
+        // 更新IP限制缓存
         if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
+            $registerCountByIP = Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip())) ?? 0;
             Cache::put(
                 CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip()),
                 (int)$registerCountByIP + 1,
                 (int)config('v2board.register_limit_expire', 60) * 60
             );
         }
-
-        $authService = new AuthService($user);
-        
-        //新增邀请判断 这里写赠送套餐逻辑 这里处理邀请着套餐赠送问题
-        if ((int)config('v2board.invite_force_present')==1) {
-            $plan = Plan::find((int)config('v2board.complimentary_packages'));
-
-            if ($plan && $user->invite_user_id) {  // 添加邀请用户ID检查
-                $user_data = User::where('id', $user->invite_user_id)->first();
-                
-                if ($user_data) {  // 添加用户存在性检查
-                    // 检查试用计划ID是否存在且不等于当前用户计划ID
-                    if (!$user_data->plan_id || (int)config('v2board.try_out_plan_id') != $user_data->plan_id) {
-                        DB::beginTransaction();
-                        try {
-                            $order = new Order();
-                            $orderService = new OrderService($order);
-                            $order->user_id = $user->invite_user_id;
-                            $order->plan_id = $plan->id;
-                            $order->period = 'month_price';
-                            $order->trade_no = Helper::guid();
-                            $order->total_amount = 0;
-                            $order->status = 3;
-                            $order->type = 6;
-                            $orderService->setInvite($user);
-                            
-                            if (!$order->save()) {
-                                throw new \Exception('邀请赠送订单保存失败');
-                            }
-                            
-                            $expired_at = $user_data->expired_at;    //当前上游客户的到期时间
-                            $Plan1 = Plan::find($user_data->plan_id); //获取上游用户当前的套餐
-                            $new_Plan = Plan::find((int)config('v2board.complimentary_packages'));//准备赠送套餐详细信息
-                            if ($Plan1 && $new_Plan) {
-                                // 确保当前套餐和赠送套餐的价格大于零
-                                if ($Plan1->month_price > 0 && $new_Plan->month_price > 0) {
-
-                                    // 假设一个月有720小时（30天 * 24小时）
-                                    $hoursInMonth = 720;
-
-                                    // 计算当前套餐的每小时价格（分转换为元）
-                                    $currentHourlyPrice = ($Plan1->month_price / 100) / $hoursInMonth;
-
-                                    // 计算赠送套餐的每小时价格（分转换为元）
-                                    $complimentaryHourlyPrice = ($new_Plan->month_price / 100) / $hoursInMonth;
-
-                                    // 计算赠送套餐在当前套餐价格下的等效小时数
-                                    $equivalentComplimentaryHours = $complimentaryHourlyPrice / $currentHourlyPrice * $hoursInMonth;
-
-                                    // 获取配置项中的额外赠送小时数
-                                    $configComplimentaryHours = (int)config('v2board.complimentary_package_duration');
-
-                                    // 计算总的赠送小时数
-                                    $totalComplimentaryHours = $equivalentComplimentaryHours + $configComplimentaryHours;
-
-                                    // 获取当前时间戳
-                                    $currentTimestamp = time();
-
-                                    // 计算当前套餐的剩余小时数
-                                    $remainingHours = floor(($expired_at - $currentTimestamp) / 3600);
-
-                                    // 计算总小时数
-                                    $totalHours = $remainingHours + $totalComplimentaryHours;
-
-                                    // 更新用户的到期时间
-                                    $newExpirationTimestamp = $currentTimestamp + floor($totalHours * 3600);
-                                    $user_data->expired_at = $newExpirationTimestamp;
-                                    $user_data->save();
-                                }
-                            }
-
-                            DB::commit();
-                        } catch (\Exception $e) {
-                            DB::rollback();
-                            \Log::error('邀请赠送处理失败：' . $e->getMessage());
-                        }
-                    }
-                } else {
-                    \Log::warning('邀请用户不存在，用户ID：' . $user->invite_user_id);
-                }
-            }
-        }
-        return response()->json([
-            'data' => $authService->generateAuthData($request)
-        ]);
     }
 
     public function login(AuthLogin $request)
