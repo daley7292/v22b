@@ -594,8 +594,15 @@ class ApiController extends Controller
             return response()->json([
                 'data' => $authService->generateAuthData($request)
             ]);
-        } 
-        
+        }else{
+            // 根据配置决定是否立即赠送
+            $inviteGiveType = (int)config('v2board.is_Invitation_to_give', 0);
+            if ($inviteGiveType === 1 || $inviteGiveType === 3) {
+                // 模式1和模式3都在注册时赠送一次
+                $this->handleInvitePresent($user);
+            }
+        }
+        //处理试用计划
         $this->handleTryOutPlan($user);
         //$this->handleInvitePresent($user);  //取消赠送逻辑
 

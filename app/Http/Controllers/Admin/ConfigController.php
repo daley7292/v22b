@@ -88,6 +88,7 @@ class ConfigController extends Controller
                 'invite_force_present' => (int)config('v2board.invite_force_present', 0),  //用户邀请注册赠送功能是否开启
                 'complimentary_packages' => (int)config('v2board.complimentary_packages', 0),  //邀请用户购买可选择赠送的套餐  传入套餐ID
                 'complimentary_package_duration' => (int)config('v2board.complimentary_package_duration', 0),  //设置赠送时常 单位H
+                'is_Invitation_to_give' => (int)config('v2board.is_Invitation_to_give', 0),  //设置赠送时常 单位H
             ],
             'site' => [
                 'logo' => config('v2board.logo'),
