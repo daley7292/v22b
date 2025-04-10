@@ -14,6 +14,7 @@ use App\Utils\Helper;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Http;
+use App\Http\Controllers\Passport\AuthController;
 
 class ApiController extends Controller
 {
@@ -596,11 +597,19 @@ class ApiController extends Controller
                 (int)config('v2board.register_limit_expire', 60) * 60
             );
         }
-
+        $authService = new AuthService($user);
         // 8. 根据不同注册模式处理套餐分配
         if ($request->has('redeem_code')) {
             // 兑换码注册 - 使用兑换码对应的套餐
             $this->handleRedeemPlan($user, $redeemInfo);
+            // 处理邀请奖励
+
+            $inviteGiveType = (int)config('v2board.is_Invitation_to_give', 0);
+            if ($inviteGiveType === 1 || $inviteGiveType === 3) {
+                $AuthController =new AuthController();
+                $AuthController->handleInviteCode($request,$user);
+            }
+
             return response()->json([
                 'data' => $authService->generateAuthData($request)
             ]);
@@ -616,8 +625,6 @@ class ApiController extends Controller
         $this->handleTryOutPlan($user);
         //$this->handleInvitePresent($user);  //取消赠送逻辑
 
-        // 9. 生成认证数据并返回
-        $authService = new AuthService($user);
         // 10. 处理订单记录
         $tryOutHours = (int)config('v2board.try_out_hour', 1);
         $plan = Plan::find(config('v2board.try_out_plan_id'));
@@ -695,7 +702,7 @@ class ApiController extends Controller
         if (!$plan) {
             return;
         }
-    
+
         // 设置用户套餐信息
         $user->transfer_enable = $plan->transfer_enable * 1073741824;
         $user->plan_id = $plan->id;
@@ -748,8 +755,14 @@ class ApiController extends Controller
             $order->type = 4; // 赠送类型
             $order->redeem_code = $redeemInfo['redeem_code']; // 记录兑换码
             $order->gift_days = $giftDays; // 赠送天数
+            $order->invite_user_id = $redeemInfo['user_id'];
             // 保存订单
             if (!$order->save()) {
+
+
+
+
+
                 \Log::error('兑换码赠送订单创建失败:', [
                     'user_id' => $user->id,
                     'plan_id' => $plan->id,
@@ -757,6 +770,7 @@ class ApiController extends Controller
                 ]);
             }
         } catch (\Exception $e) {
+
             \Log::error('兑换码赠送订单异常:', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()

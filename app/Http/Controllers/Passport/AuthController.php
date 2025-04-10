@@ -187,7 +187,7 @@ class AuthController extends Controller
         return $user;
     }
 
-    private function handleInviteCode(Request $request, User $user)
+    public function handleInviteCode(Request $request, User $user)
     {
         $inviteCode = InviteCode::where('code', $request->input('invite_code'))
             ->where('status', 0)
@@ -214,19 +214,18 @@ class AuthController extends Controller
         }
     }
 
-    private function handleInviteReward(User $user)
+    public function handleInviteReward(User $user)
     {
         try {
             $inviter = User::find($user->invite_user_id);
             if (!$inviter || (int)config('v2board.try_out_plan_id') == $inviter->plan_id) {
                 return;
             }
-
+            //var_dump($inviter);exit();
             $plan = Plan::find((int)config('v2board.complimentary_packages'));
             if (!$plan) {
                 return;
             }
-
             DB::transaction(function () use ($user, $plan, $inviter) {
                 // 创建赠送订单
                 $order = new Order();
@@ -239,12 +238,12 @@ class AuthController extends Controller
                 $order->status = 3;
                 $order->type = 6;
                 $order->invited_user_id = $user->id;
+                $order->redeem_code = null;
                 $orderService->setInvite($user);
                 $order->save();
 
                 // 更新邀请人状态
                 $inviter->has_received_inviter_reward = 1;
-                $inviter->save();
 
                 // 更新到期时间
                 $currentTime = time();
