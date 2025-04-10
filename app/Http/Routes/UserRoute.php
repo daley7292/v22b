@@ -32,6 +32,7 @@ class UserRoute
             $router->get ('/order/check', 'User\\OrderController@check');
             $router->get ('/order/detail', 'User\\OrderController@detail');
             $router->get ('/order/fetch', 'User\\OrderController@fetch');
+            $router->post ('/order/cancel', 'User\\OrderController@cancel');
             $router->get ('/order/getPaymentMethod', 'User\\OrderController@getPaymentMethod');
             // Plan
             $router->get ('/plan/fetch', 'User\\PlanController@fetch');
