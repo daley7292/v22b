@@ -603,13 +603,11 @@ class ApiController extends Controller
             // 兑换码注册 - 使用兑换码对应的套餐
             $this->handleRedeemPlan($user, $redeemInfo);
             // 处理邀请奖励
-
             $inviteGiveType = (int)config('v2board.is_Invitation_to_give', 0);
             if ($inviteGiveType === 1 || $inviteGiveType === 3) {
                 $AuthController =new AuthController();
                 $AuthController->handleInviteCode($request,$user);
             }
-
             return response()->json([
                 'data' => $authService->generateAuthData($request)
             ]);
