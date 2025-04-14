@@ -86,16 +86,14 @@ class AuthController extends Controller
         if ($request->input('invite_code')) {
             $this->handleInviteCode($request, $user);
         }
-        
-        // 4. 处理试用计划
-        $this->handleTrialPlan($user);
-        
-        // 5. 保存用户并处理后续操作
+
+        // 4. 保存用户并处理后续操作
         if (!$user->save()) {
             abort(500, __('Register failed'));
         }
 
-
+        // 5. 处理试用计划
+        $this->handleTrialPlan($user);
 
 
         // 6. 清理验证码和更新登录时间
