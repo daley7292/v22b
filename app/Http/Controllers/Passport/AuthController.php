@@ -94,7 +94,10 @@ class AuthController extends Controller
         if (!$user->save()) {
             abort(500, __('Register failed'));
         }
-        
+
+
+
+
         // 6. 清理验证码和更新登录时间
         $this->handlePostRegistration($request, $user);
         
@@ -214,6 +217,7 @@ class AuthController extends Controller
         }
     }
 
+    // 处理邀请奖励
     public function handleInviteReward(User $user)
     {
         try {
@@ -227,31 +231,35 @@ class AuthController extends Controller
                 return;
             }
             DB::transaction(function () use ($user, $plan, $inviter) {
-                // 创建赠送订单
-                $order = new Order();
-                $orderService = new OrderService($order);
-                $order->user_id = $inviter->id;
-                $order->plan_id = $plan->id;
-                $order->period = 'month_price';
-                $order->trade_no = Helper::guid();
-                $order->total_amount = 0;
-                $order->status = 3;
-                $order->type = 6;
-                $order->invited_user_id = $user->id;
-                $order->redeem_code = null;
-                $orderService->setInvite($user);
-                $order->save();
-
-                // 更新邀请人状态
-                $inviter->has_received_inviter_reward = 1;
 
                 // 更新到期时间
                 $currentTime = time();
                 if ($inviter->expired_at === null || $inviter->expired_at < $currentTime) {
                     $inviter->expired_at = $currentTime;
                 }
+                //赠送套餐时长
                 $add_seconds = (int)config('v2board.complimentary_package_duration', 1) * 86400;
                 $inviter->expired_at = $inviter->expired_at + $add_seconds;
+                // 将秒数转换为天数（保留原始计算精度）
+                $calculated_days = $add_seconds / 86400;
+                $formatted_days = number_format($calculated_days, 2, '.', '');
+                // 创建赠送订单
+                $order = new Order();
+                $orderService = new OrderService($order);
+                $order->user_id = $inviter->id;
+                $order->plan_id = $plan->id;
+                $order->period = 'try_out';  //赠送标记位
+                $order->trade_no = Helper::guid();
+                $order->total_amount = 0;
+                $order->status = 3;
+                $order->type = 6;
+                $order->invited_user_id = $user->id;
+                $order->redeem_code = null;
+                $order->gift_days=$formatted_days;
+                $orderService->setInvite($user);
+                $order->save();
+                // 更新邀请人状态
+                $inviter->has_received_inviter_reward = 1;
                 $inviter->save();
 
                 \Log::info('注册邀请奖励发放成功', [
@@ -275,11 +283,26 @@ class AuthController extends Controller
         if ((int)config('v2board.try_out_plan_id', 0)) {
             $plan = Plan::find(config('v2board.try_out_plan_id'));
             if ($plan) {
+                //判断试用计划是否存在并且进行更新
                 $user->transfer_enable = $plan->transfer_enable * 1073741824;
                 $user->plan_id = $plan->id;
                 $user->group_id = $plan->group_id;
                 $user->expired_at = time() + (config('v2board.try_out_hour', 1) * 3600);
                 $user->speed_limit = $plan->speed_limit;
+
+                $tryOutHours = (int)config('v2board.try_out_hour', 1);
+                $giftDays = round($tryOutHours / 24, 2); // 保留两位小数
+                $order = new Order();
+                $order->user_id = $user->id;
+                $order->plan_id = $plan->id;
+                $order->period = 'try_out';  // 修改这里，固定使用 try_out
+                $order->trade_no = Helper::guid();
+                $order->total_amount = 0; // 赠送订单金额为0
+                $order->status = 3; // 已完成状态
+                $order->type = 4; // 赠送类型
+                $order->gift_days = $giftDays; // 赠送天数
+                $order->redeem_code = ''; // 添加空字符串作为默认值
+                $order->save();
             }
         } else {
             $user->transfer_enable = 0;
