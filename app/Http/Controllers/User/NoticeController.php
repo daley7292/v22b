@@ -36,7 +36,7 @@ class NoticeController extends Controller
         $res = Notice::orderBy('created_at', 'DESC')
             ->where('show', 1)
             ->where('windows_type', $windowsType)
-            ->where('tags', 'like', '%弹窗%')
+            ->whereJsonContains('tags', '弹窗')
             ->get();
         return response([
             'data' => $res
