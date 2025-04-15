@@ -23,14 +23,17 @@ class NoticeController extends Controller
             'title',
             'content',
             'img_url',
-            'tags'
+            'tags',
+            'windows_type'   //新增用于判断其他频道的标识必须配合tags包含弹窗才可以
         ]);
         if (!$request->input('id')) {
+            $data['created_at'] = time();
             if (!Notice::create($data)) {
                 abort(500, '保存失败');
             }
         } else {
             try {
+                $data['updated_at'] = time();
                 Notice::find($request->input('id'))->update($data);
             } catch (\Exception $e) {
                 abort(500, '保存失败');

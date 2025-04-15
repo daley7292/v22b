@@ -17,7 +17,8 @@ class NoticeSave extends FormRequest
             'title' => 'required',
             'content' => 'required',
             'img_url' => 'nullable|url',
-            'tags' => 'nullable|array'
+            'tags' => 'nullable|array',
+            'windows_type' => 'nullable|integer|min:1|max:7' // 添加验证规则
         ];
     }
 

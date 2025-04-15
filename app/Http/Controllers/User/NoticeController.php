@@ -23,4 +23,25 @@ class NoticeController extends Controller
             'total' => $total
         ]);
     }
+
+    /*
+     * 获取新的弹窗信息
+     */
+    public function getPopMessage(Request $request)
+    {
+        $windowsType = $request->input('windows_type');
+        if (!$windowsType) {
+            return response(['error' => 'windows_type is required'], 400);
+        }
+        $res = Notice::orderBy('created_at', 'DESC')
+            ->where('show', 1)
+            ->where('windows_type', $windowsType)
+            ->where('tags', 'like', '%弹窗%')
+            ->get();
+        return response([
+            'data' => $res
+        ]);
+    }
+
 }
+

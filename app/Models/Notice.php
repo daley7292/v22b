@@ -12,6 +12,7 @@ class Notice extends Model
     protected $casts = [
         'created_at' => 'timestamp',
         'updated_at' => 'timestamp',
-        'tags' => 'array'
+        'tags' => 'array',
+        'windows_type' => 'integer'  // 添加这行
     ];
 }
