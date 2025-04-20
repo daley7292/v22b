@@ -47,6 +47,7 @@ class RuleController extends Controller
                 }
                 $params['updated_at'] = $currentTime;
                 $params['ua']= $params['ua'];
+                $params['prot']= $params['prot']??null;
                 $params['sort']= $params['sort']??0;
                 $route->update($params);
                 return [

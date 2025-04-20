@@ -26,55 +26,26 @@ class General
         $rules = \App\Models\ServerRule::orderBy('sort', 'ASC')
             ->orderBy('id', 'DESC')
             ->get();
-        
-        // 获取请求的 User-Agent 并转小写处理
+        // 获取请求的 User-Agent
         $userAgent = strtolower(request()->header('User-Agent') ?? '');
 
-        // 添加调试日志
-        \Log::info('UA Debug:', [
-            'user_agent' => $userAgent,
-            'rules_count' => $rules->count()
-        ]);
-
         foreach ($servers as &$item) {
+            // 检查是否存在 group_id
             if (isset($item['group_id'])) {
-                // 优化规则匹配逻辑
+                // 获取符合条件的第一个规则（sort最小，优先级最高的）
                 $matchedRule = $rules->first(function($rule) use ($userAgent, $item) {
-                    // 如果规则无效则跳过
-                    if (empty($rule->ua) || empty($rule->server_arr)) {
-                        return false;
+                    if (!empty($rule->ua) && strpos($userAgent, $rule->ua) !== false) {
+                        $ruleGroupIds = explode(',', $rule->server_arr);
+                        return in_array($item['group_id'], $ruleGroupIds);
                     }
-
-                    // UA 匹配检查（不区分大小写）
-                    $uaMatch = stripos($userAgent, $rule->ua) !== false;
-                    
-                    // 分组匹配检查
-                    $ruleGroupIds = array_map('trim', explode(',', $rule->server_arr));
-                    $groupMatch = in_array((string)$item['group_id'], $ruleGroupIds);
-
-                    // 记录匹配过程
-                    \Log::debug('Rule matching:', [
-                        'rule_id' => $rule->id,
-                        'ua_pattern' => $rule->ua,
-                        'current_group' => $item['group_id'],
-                        'rule_groups' => $rule->server_arr,
-                        'ua_match' => $uaMatch,
-                        'group_match' => $groupMatch
-                    ]);
-
-                    return $uaMatch && $groupMatch;
+                    return false;
                 });
 
-                // 应用匹配规则
+                // 如果找到匹配的规则，应用规则
                 if ($matchedRule) {
-                    \Log::info('Applied rule:', [
-                        'rule_id' => $matchedRule->id,
-                        'original_host' => $item['host'],
-                        'new_host' => $matchedRule->domain,
-                        'new_port' => $matchedRule->port
-                    ]);
-
+                    // 替换域名
                     $item['host'] = $matchedRule->domain;
+                    // 只在 port 不为 null 时替换端口
                     if (!is_null($matchedRule->port)) {
                         $item['port'] = $matchedRule->port;
                     }
@@ -92,7 +63,7 @@ class General
                 $uri .= self::buildTrojan($user['uuid'], $item);
             }
         }
-        
+
         return base64_encode($uri);
     }
 

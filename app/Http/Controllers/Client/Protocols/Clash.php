@@ -111,6 +111,7 @@ class Clash
                             if (is_array($item['group_id'])) {
                                 // 任意一个group_id匹配即可
                                 $matched = false;
+
                                 foreach ($item['group_id'] as $gid) {
                                     if (in_array((string)$gid, $ruleGroupIds)) {
                                         $matched = true;
