@@ -14,11 +14,41 @@ class CouponService
     public $userId;
     public $period;
 
-    public function __construct($code)
+    public function __construct($code, $period = null)
     {
+        // 检查输入是否为空
+        if (empty($code)) {
+            abort(500, __('Coupon code cannot be empty'));
+        }
+        
+        // 查询优惠码
         $this->coupon = Coupon::where('code', $code)
             ->lockForUpdate()
             ->first();
+        
+        // 验证优惠码是否存在
+        if (!$this->coupon) {
+            abort(500, __('Coupon code does not exist'));
+        }
+        
+        // 处理 period 参数
+        if ($period !== null) {
+            // 如果是数组，只取第一个元素
+            if (is_array($period)) {
+                $this->period = isset($period[0]) ? $period[0] : null;
+            } else {
+                $this->period = $period;
+            }
+            
+            // 验证 period
+            if ($this->coupon->limit_period && !empty($this->period)) {
+                if (!in_array($this->period, $this->coupon->limit_period)) {
+                    abort(500, __('The coupon code cannot be used for this period (:period)', [
+                        'period' => $this->period
+                    ]));
+                }
+            }
+        }
     }
 
     public function use(Order $order):bool
@@ -85,7 +115,7 @@ class CouponService
 
     public function check()
     {
-        if (!$this->coupon || !$this->coupon->show) {
+        if (!$this->coupon->show) {
             abort(500, __('Invalid coupon'));
         }
         if ($this->coupon->limit_use <= 0 && $this->coupon->limit_use !== NULL) {
@@ -114,6 +144,8 @@ class CouponService
                 ]));
             }
         }
+
+            
         $user = User::find($this->userId);
         $userInviterId = $user->invite_user_id;
         if ($this->coupon->limit_inviter_ids) {
