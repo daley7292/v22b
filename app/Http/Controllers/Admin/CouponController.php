@@ -67,7 +67,7 @@ class CouponController extends Controller
         } else {
             try {
                 $params['updated_at'] = time();
-                $params['limit_inviter_ids'] = $params['limit_inviter_ids'];
+                $params['limit_inviter_ids'] = $params['limit_inviter_ids']??null;
                 Coupon::find($request->input('id'))->update($params);
             } catch (\Exception $e) {
                 abort(500, '保存失败');
