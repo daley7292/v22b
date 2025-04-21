@@ -386,5 +386,5 @@ class OrderController extends Controller
         }
         return $getAmount / 100;
     }
-
+    
 }

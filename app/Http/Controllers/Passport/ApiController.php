@@ -649,7 +649,7 @@ class ApiController extends Controller
      * @param string $redeemCode
      * @return array|null
      */
-    private function validateRedeemCode($redeemCode)  
+    public function validateRedeemCode($redeemCode)
     {
 
         if (empty($redeemCode)) {
@@ -694,11 +694,11 @@ class ApiController extends Controller
     /**
      * 处理兑换码套餐
      */
-    private function handleRedeemPlan(User $user, array $redeemInfo)
+    public function handleRedeemPlan(User $user, array $redeemInfo)
     {
         $plan = Plan::find($redeemInfo['plan_id']);
         if (!$plan) {
-            return;
+            return false;
         }
 
         // 设置用户套餐信息
@@ -756,23 +756,21 @@ class ApiController extends Controller
             $order->invite_user_id = $redeemInfo['user_id'];
             // 保存订单
             if (!$order->save()) {
-
-
-
-
-
                 \Log::error('兑换码赠送订单创建失败:', [
                     'user_id' => $user->id,
                     'plan_id' => $plan->id,
                     'redeem_code' => $redeemInfo['redeem_code']
                 ]);
+                return false;
+            }else{
+                return true;
             }
         } catch (\Exception $e) {
-
             \Log::error('兑换码赠送订单异常:', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
+            return false;
         }
     }
 

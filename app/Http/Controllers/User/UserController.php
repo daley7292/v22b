@@ -18,6 +18,7 @@ use App\Models\Order;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
+use App\Http\Controllers\Passport\ApiController;
 
 class UserController extends Controller
 {
@@ -297,118 +298,70 @@ class UserController extends Controller
      */
     public function redeemPlan(Request $request)
     {
+        // 验证请求参数
+        if (!$request->has('redeem_code') || empty($request->input('redeem_code'))) {
+            return response([
+                'data' => [
+                    'state' => false,
+                    'msg' => '兑换码不能为空'
+                ]
+            ], 400);
+        }
+        
+        // 获取用户并验证
+        $user_id = $request->user['id'];
+        $user = User::find($user_id);
+        if (!$user) {
+            return response([
+                'data' => [
+                    'state' => false,
+                    'msg' => '用户不存在'
+                ]
+            ], 404);
+        }
+        
+        // 使用事务处理
         try {
-            // 1. 验证请求参数
-            $validated = $request->validate([
-                'redeem_code' => 'required|string|size:6'
-            ], [
-                'redeem_code.required' => '兑换码不能为空',
-                'redeem_code.string' => '兑换码必须为字符串',
-                'redeem_code.size' => '兑换码长度必须为6位'
-            ]);
-
-            // 2. 获取当前用户
-            $user = User::find($request->user['id']);
-            if (!$user) {
-                abort(500, __('用户不存在'));
-            }
-
-            // 3. 验证兑换码
-            $convert = \App\Models\Convert::where('redeem_code', $validated['redeem_code'])
-                ->where('end_at', '>', time())
-                ->first();
-
-            if (!$convert) {
-                abort(400, '兑换码无效或已过期');
-            }
-
-            // 4. 检查兑换次数
-            if ($convert->ordinal_number === -1) {
-                abort(400, '该兑换码已无法使用');
-            }
-
-            // 5. 获取套餐信息
-            $plan = Plan::find($convert->plan_id);
-            if (!$plan) {
-                abort(500, '套餐不存在');
-            }
-
             DB::beginTransaction();
-            try {
-                // 6. 更新用户套餐信息
-                $transfer_enable = $plan->transfer_enable * 1073741824;
-                
-                // 计算到期时间
-                $duration = 0;
-                switch ($convert->duration_unit) {
-                    case 'month':
-                        $duration = $convert->duration_value * 30 * 86400;
-                        break;
-                    case 'quarter':
-                        $duration = $convert->duration_value * 90 * 86400;
-                        break;
-                    case 'half_year':
-                        $duration = $convert->duration_value * 180 * 86400;
-                        break;
-                    case 'year':
-                        $duration = $convert->duration_value * 365 * 86400;
-                        break;
-                    default:
-                        $duration = $convert->duration_value * 86400;
-                }
-
-                // 更新用户信息
-                $user->transfer_enable = $transfer_enable;
-                $user->plan_id = $plan->id;
-                $user->group_id = $plan->group_id;
-                $user->expired_at = time() + $duration;
-                $user->save();
-
-                // 7. 创建订单记录
-                $order = new Order();
-                $order->user_id = $user->id;
-                $order->plan_id = $plan->id;
-                $order->trade_no = Helper::guid();
-                $order->total_amount = 0;
-                $order->status = 3; // 已完成
-                $order->type = 4;   // 兑换
-                $order->redeem_code = $validated['redeem_code'];
-                $order->save();
-
-                // 8. 更新兑换码使用次数
-                if ($convert->ordinal_number > 0) {
-                    if ($convert->ordinal_number === 1) {
-                        $convert->ordinal_number = -1;  // 设置为已用尽
-                    } else {
-                        $convert->ordinal_number -= 1;
-                    }
-                    $convert->save();
-                }
-
-                DB::commit();
-
+            
+            $Api = new ApiController();
+            $redeemInfo = $Api->validateRedeemCode($request->input('redeem_code'));
+            
+            if (!$redeemInfo) {
+                DB::rollBack();
                 return response([
                     'data' => [
-                        'plan_name' => $plan->name,
-                        'expired_at' => date('Y-m-d H:i:s', $user->expired_at),
-                        'transfer_enable' => $transfer_enable,
-                        'message' => '套餐兑换成功'
+                        'state' => false,
+                        'msg' => '您的兑换码有误'
+                    ]
+                ], 400);
+            }
+            
+            if ($Api->handleRedeemPlan($user, $redeemInfo)) {
+                DB::commit();
+                return response([
+                    'data' => [
+                        'state' => true,
+                        'msg' => '兑换成功'
                     ]
                 ]);
-
-            } catch (\Exception $e) {
+            } else {
                 DB::rollBack();
-                abort(500, '兑换失败：' . $e->getMessage());
+                return response([
+                    'data' => [
+                        'state' => false,
+                        'msg' => '兑换失败'
+                    ]
+                ]);
             }
-
         } catch (\Exception $e) {
-            \Log::error('套餐兑换失败:', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'user_id' => $request->user['id']
-            ]);
-
-            abort(500, '兑换失败：' . $e->getMessage());
+            DB::rollBack();
+            return response([
+                'data' => [
+                    'state' => false,
+                    'msg' => '兑换过程发生错误: ' . $e->getMessage()
+                ]
+            ], 500);
         }
     }
 }
