@@ -31,15 +31,9 @@ class CouponService
             abort(500, __('Coupon code does not exist'));
         }
         
-        // 处理 period 参数
+        // 处理 period 参数（现在只接收字符串）
         if ($period !== null) {
-            // 如果是数组，只取第一个元素
-            if (is_array($period)) {
-                $this->period = isset($period[0]) ? $period[0] : null;
-            } else {
-                $this->period = $period;
-            }
-            
+            $this->period = $period;
             // 验证 period
             if ($this->coupon->limit_period && !empty($this->period)) {
                 if (!in_array($this->period, $this->coupon->limit_period)) {
