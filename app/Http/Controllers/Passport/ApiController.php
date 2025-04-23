@@ -16,6 +16,7 @@ use App\Utils\Helper;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\DB;
 
 
 class ApiController extends Controller
@@ -325,8 +326,10 @@ class ApiController extends Controller
         // 邮箱白名单验证
         $this->validateEmailRules($request);
 
-        // 注册开关与邀请码验证
-        $this->validateInviteCode($request);
+        // 只有传了邀请码时才校验
+        if ($request->has('invite_code')) {
+            $this->validateInviteCode($request);
+        }
     }
 
     /**
