@@ -2,19 +2,21 @@
 
 namespace App\Http\Controllers\Passport;
 
+use App\Http\Controllers\Passport\AuthController;
 use App\Models\InviteCode;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
 use App\Services\AuthService;
 use App\Services\OrderService;
+use Illuminate\Support\Facades\Cache;
 use App\Utils\CacheKey;
 use App\Utils\Dict;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Http;
-use App\Http\Controllers\Passport\AuthController;
+
 
 class ApiController extends Controller
 {
@@ -372,7 +374,7 @@ class ApiController extends Controller
     {
         $email = $request->input('email');
         $password = $request->input('password');
-        
+
         // 检查邮箱是否存在
         if (User::where('email', $email)->first()) {
             abort(500, __('Email already exists'));
@@ -386,11 +388,11 @@ class ApiController extends Controller
         $user->is_admin = 0;  // 显式设置默认值
         // 处理邀请码
         $this->handleInviteCode($request, $user);
-        
-        // 处理试用计划
-       //$this->handleTryOutPlan($user);
 
-    
+        // 处理试用计划
+        //$this->handleTryOutPlan($user);
+
+
         if (!$user->save()) {
             abort(500, __('Register failed'));
         }
@@ -497,17 +499,17 @@ class ApiController extends Controller
             if (!$currentPlan || $currentPlan->month_price <= 0 || $newPlan->month_price <= 0) {
                 return;
             }
-    
+
             // 计算每小时价格
             $hoursInMonth = 720; // 30天 * 24小时
             $currentHourlyPrice = ($currentPlan->month_price / 100) / $hoursInMonth;
             $complimentaryHourlyPrice = ($newPlan->month_price / 100) / $hoursInMonth;
-            
+
             // 计算赠送时长
             $equivalentComplimentaryHours = $complimentaryHourlyPrice / $currentHourlyPrice * $hoursInMonth;
             $configComplimentaryHours = (int)config('v2board.complimentary_package_duration');
             $totalComplimentaryHours = $equivalentComplimentaryHours + $configComplimentaryHours;
-            
+
             // 计算总赠送天数（保留两位小数）
             $giftDays = round($totalComplimentaryHours / 24, 2);
             // 计算新的到期时间
@@ -517,11 +519,11 @@ class ApiController extends Controller
                 $remainingHours = 0; // 如果已过期，从当前时间开始计算
             }
             $totalHours = $remainingHours + $totalComplimentaryHours;
-            
+
             // 更新邀请人到期时间
             $inviter->expired_at = $currentTimestamp + floor($totalHours * 3600);
             $inviter->save();
-    
+
             // 更新订单的赠送天数字段
             $order->gift_days = $giftDays;
             $order->save();
@@ -565,7 +567,7 @@ class ApiController extends Controller
 
         // 2. 验证各项限制
         $this->validateRegisterLimits($request);
-        
+
         // 3. 验证邮箱验证码
         if ((int)config('v2board.email_verify', 0)) {
             if (empty($request->input('email_code'))) {
@@ -583,7 +585,7 @@ class ApiController extends Controller
         if ((int)config('v2board.email_verify', 0)) {
             Cache::forget(CacheKey::get('EMAIL_VERIFY_CODE', $request->input('email')));
         }
-            
+
         // 6. 更新最后登录时间
         $user->last_login_at = time();
         $user->save();
@@ -659,7 +661,7 @@ class ApiController extends Controller
         // 查找对应的转换记录
         $convert = \App\Models\Convert::where('redeem_code', $redeemCode)
             ->where('end_at', '>', time())
-            ->first();  
+            ->first();
         if (!$convert) {
             return null;
         }
@@ -687,7 +689,7 @@ class ApiController extends Controller
             'duration_unit' => $convert->duration_unit,
             'duration_value' => $convert->duration_value,
             'redeem_code' => $redeemCode,
-            'user_id' => $User->id 
+            'user_id' => $User->id
         ];
     }
 
@@ -705,7 +707,7 @@ class ApiController extends Controller
         $user->transfer_enable = $plan->transfer_enable * 1073741824;
         $user->plan_id = $plan->id;
         $user->group_id = $plan->group_id;
-        
+
         // 计算到期时间和订单周期
         $duration = 0;
         $orderPeriod = '';
@@ -743,7 +745,7 @@ class ApiController extends Controller
         try {
             $order = new Order();
             $orderService = new OrderService($order);
-            
+
             $order->user_id = $user->id;
             $order->plan_id = $plan->id;
             $order->period = $orderPeriod;
@@ -851,85 +853,85 @@ class ApiController extends Controller
      */
     private function handleFirstOrderReward(Order $order)
     {
-       
-            // 1. 获取订单用户和其邀请人
-            $user = User::find($order->user_id);
-            if (!$user || !$user->invite_user_id) {
-                \Log::info('用户不存在或无邀请人', [
-                    'order_id' => $order->id,
-                    'user_id' => $order->user_id
-                ]);
+
+        // 1. 获取订单用户和其邀请人
+        $user = User::find($order->user_id);
+        if (!$user || !$user->invite_user_id) {
+            \Log::info('用户不存在或无邀请人', [
+                'order_id' => $order->id,
+                'user_id' => $order->user_id
+            ]);
+            return;
+        }
+
+        // 2. 获取邀请人信息
+        $inviter = User::find($user->invite_user_id);
+        if (!$inviter) {
+            \Log::info('邀请人不存在', [
+                'user_id' => $user->id,
+                'invite_user_id' => $user->invite_user_id
+            ]);
+            return;
+        }
+
+        // 3. 检查是否是首次付费订单
+        $hasOtherPaidOrders = Order::where('user_id', $user->id)
+            ->where('id', '!=', $order->id)
+            ->where('status', 3) // 已支付
+            ->where('type', '!=', 4) // 非赠送订单
+            ->exists();
+
+        if ($hasOtherPaidOrders) {
+            \Log::info('非首次付费订单，不触发邀请奖励', [
+                'user_id' => $user->id,
+                'order_id' => $order->id
+            ]);
+            return;
+        }
+
+        // 4. 检查邀请人是否已获得该用户的奖励
+        if ($inviter->has_received_inviter_reward) {
+            \Log::info('邀请人已获得过该用户的奖励', [
+                'inviter_id' => $inviter->id,
+                'user_id' => $user->id
+            ]);
+            return;
+        }
+
+        // 5. 处理邀请奖励
+        DB::transaction(function () use ($user, $inviter, $order) {
+            $plan = Plan::find((int)config('v2board.complimentary_packages'));
+            if (!$plan) {
+                \Log::error('赠送套餐不存在');
                 return;
             }
 
-            // 2. 获取邀请人信息
-            $inviter = User::find($user->invite_user_id);
-            if (!$inviter) {
-                \Log::info('邀请人不存在', [
-                    'user_id' => $user->id,
-                    'invite_user_id' => $user->invite_user_id
-                ]);
-                return;
-            }
+            // 创建赠送订单
+            $rewardOrder = new Order();
+            $orderService = new OrderService($rewardOrder);
+            $rewardOrder->user_id = $inviter->id;
+            $rewardOrder->plan_id = $plan->id;
+            $rewardOrder->period = 'month_price';
+            $rewardOrder->trade_no = Helper::guid();
+            $rewardOrder->total_amount = 0;
+            $rewardOrder->status = 3;
+            $rewardOrder->type = 6; // 首单奖励类型
+            $rewardOrder->invited_user_id = $user->id; // 记录来源用户
+            $orderService->setInvite($user);
+            $rewardOrder->save();
 
-            // 3. 检查是否是首次付费订单
-            $hasOtherPaidOrders = Order::where('user_id', $user->id)
-                ->where('id', '!=', $order->id)
-                ->where('status', 3) // 已支付
-                ->where('type', '!=', 4) // 非赠送订单
-                ->exists();
-                
-            if ($hasOtherPaidOrders) {
-                \Log::info('非首次付费订单，不触发邀请奖励', [
-                    'user_id' => $user->id,
-                    'order_id' => $order->id
-                ]);
-                return;
-            }
+            // 标记邀请人已获得该用户的奖励
+            $inviter->has_received_inviter_reward = 1;
+            $inviter->save();
 
-            // 4. 检查邀请人是否已获得该用户的奖励
-            if ($inviter->has_received_inviter_reward) {
-                \Log::info('邀请人已获得过该用户的奖励', [
-                    'inviter_id' => $inviter->id,
-                    'user_id' => $user->id
-                ]);
-                return;
-            }
+            // 更新邀请人有效期
+            $this->updateInviterExpiry($inviter, $plan, $rewardOrder);
 
-            // 5. 处理邀请奖励
-            DB::transaction(function () use ($user, $inviter, $order) {
-                $plan = Plan::find((int)config('v2board.complimentary_packages'));
-                if (!$plan) {
-                    \Log::error('赠送套餐不存在');
-                    return;
-                }
-
-                // 创建赠送订单
-                $rewardOrder = new Order();
-                $orderService = new OrderService($rewardOrder);
-                $rewardOrder->user_id = $inviter->id;
-                $rewardOrder->plan_id = $plan->id;
-                $rewardOrder->period = 'month_price';
-                $rewardOrder->trade_no = Helper::guid();
-                $rewardOrder->total_amount = 0;
-                $rewardOrder->status = 3;
-                $rewardOrder->type = 6; // 首单奖励类型
-                $rewardOrder->invited_user_id = $user->id; // 记录来源用户
-                $orderService->setInvite($user);
-                $rewardOrder->save();
-
-                // 标记邀请人已获得该用户的奖励
-                $inviter->has_received_inviter_reward = 1;
-                $inviter->save();
-
-                // 更新邀请人有效期
-                $this->updateInviterExpiry($inviter, $plan, $rewardOrder);
-
-                \Log::info('首次付费邀请奖励发放成功', [
-                    'user_id' => $user->id,
-                    'inviter_id' => $inviter->id,
-                    'order_id' => $rewardOrder->id
-                ]);
-            });
+            \Log::info('首次付费邀请奖励发放成功', [
+                'user_id' => $user->id,
+                'inviter_id' => $inviter->id,
+                'order_id' => $rewardOrder->id
+            ]);
+        });
     }
 }
