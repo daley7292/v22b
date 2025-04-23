@@ -244,4 +244,43 @@ class ConvertController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * 删除兑换码记录
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function delete(Request $request)
+    {
+        $id = $request->input('id');
+        if (empty($id)) {
+            return response([
+                'message' => 'ID不能为空'
+            ], 400);
+        }
+
+        try {
+            $convert = Convert::find($id);
+            if (!$convert) {
+                return response([
+                    'message' => '未找到ID为 ' . $id . ' 的数据记录'
+                ], 404);
+            }
+            $convert->delete();
+
+            return response([
+                'message' => '删除成功'
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('删除Convert数据失败:', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'id' => $id
+            ]);
+
+            return response([
+                'message' => '删除失败：' . $e->getMessage()
+            ], 500);
+        }
+    }
 }
