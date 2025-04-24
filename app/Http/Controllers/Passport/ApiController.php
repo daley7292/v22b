@@ -880,7 +880,7 @@ class ApiController extends Controller
         $hasOtherPaidOrders = Order::where('user_id', $user->id)
             ->where('id', '!=', $order->id)
             ->where('status', 3) // 已支付
-            ->where('type', '!=', 4) // 非赠送订单
+            ->whereNotIn('type', [4, 5, 6]) // 排除所有赠送类型订单
             ->exists();
 
         if ($hasOtherPaidOrders) {
@@ -901,13 +901,13 @@ class ApiController extends Controller
         }
 
         // 5. 处理邀请奖励
-        DB::transaction(function () use ($user, $inviter, $order) {
-            $plan = Plan::find((int)config('v2board.complimentary_packages'));
-            if (!$plan) {
-                \Log::error('赠送套餐不存在');
-                return;
-            }
+        $plan = Plan::find((int)config('v2board.complimentary_packages'));
+        if (!$plan) {
+            \Log::error('赠送套餐不存在');
+            return;
+        }
 
+        try {
             // 创建赠送订单
             $rewardOrder = new Order();
             $orderService = new OrderService($rewardOrder);
@@ -934,6 +934,13 @@ class ApiController extends Controller
                 'inviter_id' => $inviter->id,
                 'order_id' => $rewardOrder->id
             ]);
-        });
+        } catch (\Exception $e) {
+            \Log::error('首次付费邀请奖励发放失败', [
+                'error' => $e->getMessage(),
+                'user_id' => $user->id,
+                'inviter_id' => $inviter->id
+            ]);
+            // 错误不中断执行，只记录日志
+        }
     }
 }
