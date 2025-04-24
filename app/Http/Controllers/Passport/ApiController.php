@@ -18,7 +18,6 @@ use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
 
-
 class ApiController extends Controller
 {
     /**
@@ -553,17 +552,18 @@ class ApiController extends Controller
      */
     public function unificationReg(Request $request)
     {
+        $redeemInfo = null; // 先初始化，避免未定义
+
         // 1. 判断注册模式 - 兑换码注册优先级高于推广码注册
-        if ($request->has('redeem_code')) {
+        if ($request->filled('redeem_code')) {
             // 兑换码注册流程
             $redeemInfo = $this->validateRedeemCode($request->input('redeem_code'));
-            //var_dump($redeemInfo);exit;
             if (!$redeemInfo) {
                 abort(400, '您的兑换码有误');
             }
             // 设置邀请人ID
             $request->merge(['invite_user_id' => $redeemInfo['user_id']]);
-        } elseif ($request->has('invite_code')) {
+        } elseif ($request->filled('invite_code')) {
             // 推广码注册流程
             $this->validateInviteCode($request);
         }
@@ -604,8 +604,7 @@ class ApiController extends Controller
         }
         $authService = new AuthService($user);
         // 8. 根据不同注册模式处理套餐分配
-        if ($request->has('redeem_code')) {
-            // 兑换码注册 - 使用兑换码对应的套餐
+        if ($request->filled('redeem_code')) { // 这里改成 filled
             $this->handleRedeemPlan($user, $redeemInfo);
             // 处理邀请奖励
             $inviteGiveType = (int)config('v2board.is_Invitation_to_give', 0);
@@ -616,7 +615,7 @@ class ApiController extends Controller
             return response()->json([
                 'data' => $authService->generateAuthData($request)
             ]);
-        }else{
+        } else {
             // 根据配置决定是否立即赠送
             $inviteGiveType = (int)config('v2board.is_Invitation_to_give', 0);
             if ($inviteGiveType === 1 || $inviteGiveType === 3) {
