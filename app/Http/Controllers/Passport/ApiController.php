@@ -499,7 +499,8 @@ class ApiController extends Controller
         try {
             $currentPlan = Plan::find($inviter->plan_id);
             if (!$currentPlan || $currentPlan->month_price <= 0 || $newPlan->month_price <= 0) {
-                return;
+                \Log::warning('套餐价格异常，跳过有效期计算');
+                return; // 避免出现除零错误
             }
 
             // 计算每小时价格
@@ -543,7 +544,7 @@ class ApiController extends Controller
                 'inviter_id' => $inviter->id,
                 'order_id' => $order->id
             ]);
-            throw $e;
+            //throw $e;
         }
     }
 
@@ -747,14 +748,13 @@ class ApiController extends Controller
         try {
             $order = new Order();
             $orderService = new OrderService($order);
-
             $order->user_id = $user->id;
             $order->plan_id = $plan->id;
             $order->period = $orderPeriod;
             $order->trade_no = Helper::guid();
             $order->total_amount = 0; // 赠送订单金额为0
             $order->status = 3; // 已完成状态
-            $order->type = 4; // 赠送类型
+            $order->type = 5; // 赠送类型 4 试用 5兑换 6 推广赠送
             $order->redeem_code = $redeemInfo['redeem_code']; // 记录兑换码
             $order->gift_days = $giftDays; // 赠送天数
             $order->invite_user_id = $redeemInfo['user_id'];
