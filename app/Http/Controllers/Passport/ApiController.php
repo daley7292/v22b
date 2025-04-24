@@ -880,7 +880,7 @@ class ApiController extends Controller
         $hasOtherPaidOrders = Order::where('user_id', $user->id)
             ->where('id', '!=', $order->id)
             ->where('status', 3) // 已支付
-            ->whereNotIn('type', [4, 5, 6]) // 排除所有赠送类型订单
+            ->where('total_amount', '>', 0) // 只检查付费订单
             ->exists();
 
         if ($hasOtherPaidOrders) {
