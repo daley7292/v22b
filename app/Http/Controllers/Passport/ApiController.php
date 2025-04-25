@@ -491,11 +491,10 @@ class ApiController extends Controller
     }
 
     /**
-     * 更新邀请人的有效期
+     * 更新邀请人的有效期 - 支持套餐叠加和套餐抵扣
      */
     private function updateInviterExpiry(User $inviter, Plan $newPlan, Order $order)
     {
-
         try {
             $currentPlan = Plan::find($inviter->plan_id);
             if (!$currentPlan || $currentPlan->month_price <= 0 || $newPlan->month_price <= 0) {
@@ -503,25 +502,123 @@ class ApiController extends Controller
                 return; // 避免出现除零错误
             }
 
-            // 计算每小时价格
-            $hoursInMonth = 720; // 30天 * 24小时
-            $currentHourlyPrice = ($currentPlan->month_price / 100) / $hoursInMonth;
-            $complimentaryHourlyPrice = ($newPlan->month_price / 100) / $hoursInMonth;
-
-            // 计算赠送时长
-            $equivalentComplimentaryHours = $complimentaryHourlyPrice / $currentHourlyPrice * $hoursInMonth;
-            $configComplimentaryHours = (int)config('v2board.complimentary_package_duration');
-            $totalComplimentaryHours = $equivalentComplimentaryHours + $configComplimentaryHours;
-
-            // 计算总赠送天数（保留两位小数）
-            $giftDays = round($totalComplimentaryHours / 24, 2);
-            // 计算新的到期时间
             $currentTimestamp = time();
-            $remainingHours = floor(($inviter->expired_at - $currentTimestamp) / 3600);
-            if ($remainingHours < 0) {
-                $remainingHours = 0; // 如果已过期，从当前时间开始计算
+            $hoursInMonth = 720; // 30天 * 24小时
+            
+            // 检查是否启用套餐抵扣功能
+            $enablePlanDeduction = (int)config('v2board.plan_change_enable', 1) === 1;
+            
+            // 计算剩余有效期（小时）
+            $remainingHours = max(0, floor(($inviter->expired_at - $currentTimestamp) / 3600));
+            $configComplimentaryHours = (int)config('v2board.complimentary_package_duration', 0);
+            
+            // 相同套餐 - 根据订单周期叠加时间
+            if ($currentPlan->id === $newPlan->id) {
+                // 根据订单周期确定基础时间
+                $baseTimestamp = $inviter->expired_at > $currentTimestamp ? $inviter->expired_at : $currentTimestamp;
+                
+                // 根据订单周期确定添加的时间
+                switch ($order->period) {
+                    case 'month_price':
+                        $expiredTime = strtotime("+1 month", $baseTimestamp);
+                        $periodLabel = '月付';
+                        break;
+                    case 'quarter_price':
+                        $expiredTime = strtotime("+3 month", $baseTimestamp);
+                        $periodLabel = '季付';
+                        break;
+                    case 'half_year_price':
+                        $expiredTime = strtotime("+6 month", $baseTimestamp);
+                        $periodLabel = '半年付';
+                        break;
+                    case 'year_price':
+                        $expiredTime = strtotime("+1 year", $baseTimestamp);
+                        $periodLabel = '年付';
+                        break;
+                    default:
+                        $expiredTime = strtotime("+1 month", $baseTimestamp);
+                        $periodLabel = '默认月付';
+                }
+                
+                // 加上额外赠送时间
+                if ($configComplimentaryHours > 0) {
+                    $expiredTime = $expiredTime + ($configComplimentaryHours * 3600);
+                }
+                
+                // 计算赠送天数（用于显示）
+                $addedSeconds = $expiredTime - $baseTimestamp;
+                $giftDays = round($addedSeconds / 86400, 2);
+                
+                // 更新邀请人到期时间
+                $inviter->expired_at = $expiredTime;
+                
+                \Log::info('相同套餐叠加', [
+                    'inviter_id' => $inviter->id,
+                    'plan_id' => $currentPlan->id,
+                    'period' => $periodLabel,
+                    'old_expire_date' => date('Y-m-d H:i:s', $baseTimestamp),
+                    'new_expire_date' => date('Y-m-d H:i:s', $expiredTime),
+                    'gift_days' => $giftDays
+                ]);
+                
+                // 更新订单的赠送天数字段
+                $order->gift_days = $giftDays;
+                $order->save();
+                
+                return; // 提前返回，避免执行后面的代码
             }
-            $totalHours = $remainingHours + $totalComplimentaryHours;
+            // 不同套餐 - 根据配置决定是否抵扣
+            else {
+                if ($enablePlanDeduction) {
+                    // 计算当前套餐剩余价值
+                    $currentHourlyPrice = ($currentPlan->month_price / 100) / $hoursInMonth;
+                    $remainingValue = $remainingHours * $currentHourlyPrice;
+                    
+                    // 计算新套餐每小时价值
+                    $newHourlyPrice = ($newPlan->month_price / 100) / $hoursInMonth;
+                    
+                    // 使用剩余价值抵扣新套餐时长
+                    $deductionHours = floor($remainingValue / $newHourlyPrice);
+                    
+                    // 计算新套餐赠送时长
+                    $complimentaryHours = $hoursInMonth + $configComplimentaryHours;
+                    
+                    // 总有效期 = 抵扣时长 + 新套餐赠送时长
+                    $totalHours = $deductionHours + $complimentaryHours;
+                    $giftDays = round($complimentaryHours / 24, 2);
+                    
+                    // 更新用户套餐ID为新套餐
+                    $inviter->plan_id = $newPlan->id;
+                    $inviter->group_id = $newPlan->group_id;
+                    $inviter->transfer_enable = $newPlan->transfer_enable * 1073741824;
+                    
+                    \Log::info('不同套餐抵扣', [
+                        'inviter_id' => $inviter->id,
+                        'old_plan_id' => $currentPlan->id,
+                        'new_plan_id' => $newPlan->id,
+                        'remaining_value' => $remainingValue,
+                        'deduction_hours' => $deductionHours,
+                        'added_hours' => $complimentaryHours
+                    ]);
+                } else {
+                    // 不启用抵扣，直接重置为新套餐，不考虑剩余时间
+                    $totalHours = $hoursInMonth + $configComplimentaryHours;
+                    $giftDays = round($totalHours / 24, 2);
+                    
+                    // 更新用户套餐ID为新套餐
+                    $inviter->plan_id = $newPlan->id;
+                    $inviter->group_id = $newPlan->group_id;
+                    $inviter->transfer_enable = $newPlan->transfer_enable * 1073741824;
+                    
+                    \Log::info('不同套餐替换', [
+                        'inviter_id' => $inviter->id,
+                        'old_plan_id' => $currentPlan->id,
+                        'new_plan_id' => $newPlan->id,
+                        'forfeited_hours' => $remainingHours,
+                        'added_hours' => $totalHours
+                    ]);
+                }
+            }
 
             // 更新邀请人到期时间
             $inviter->expired_at = $currentTimestamp + floor($totalHours * 3600);
@@ -530,6 +627,7 @@ class ApiController extends Controller
             // 更新订单的赠送天数字段
             $order->gift_days = $giftDays;
             $order->save();
+            
             // 记录日志
             \Log::info('邀请赠送更新成功', [
                 'inviter_id' => $inviter->id,
@@ -537,14 +635,12 @@ class ApiController extends Controller
                 'old_expired_at' => date('Y-m-d H:i:s', $currentTimestamp + ($remainingHours * 3600)),
                 'new_expired_at' => date('Y-m-d H:i:s', $inviter->expired_at)
             ]);
-
         } catch (\Exception $e) {
             \Log::error('邀请赠送更新失败', [
                 'error' => $e->getMessage(),
                 'inviter_id' => $inviter->id,
                 'order_id' => $order->id
             ]);
-            //throw $e;
         }
     }
 
@@ -718,36 +814,51 @@ class ApiController extends Controller
         $user->group_id = $plan->group_id;
 
         // 计算到期时间和订单周期
+        $currentTime = time();
         $duration = 0;
         $orderPeriod = '';
         $days = 0; // 用于计算赠送天数
+
         switch ($redeemInfo['duration_unit']) {
             case 'month':
-                $duration = $redeemInfo['duration_value'] * 30 * 86400;
+                // 使用strtotime计算准确的月份时间
+                $expiredTime = strtotime("+{$redeemInfo['duration_value']} month", $currentTime);
+                $duration = $expiredTime - $currentTime;
                 $orderPeriod = 'month_price';
-                $days = $redeemInfo['duration_value'] * 30;
+                // 计算精确天数
+                $days = ceil($duration / 86400);
                 break;
             case 'quarter':
-                $duration = $redeemInfo['duration_value'] * 90 * 86400;
+                // 计算准确的季度（3个月）
+                $expiredTime = strtotime("+".($redeemInfo['duration_value'] * 3)." month", $currentTime);
+                $duration = $expiredTime - $currentTime;
                 $orderPeriod = 'quarter_price';
-                $days = $redeemInfo['duration_value'] * 90;
+                $days = ceil($duration / 86400);
                 break;
             case 'half_year':
-                $duration = $redeemInfo['duration_value'] * 180 * 86400;
+                // 计算半年（6个月）
+                $expiredTime = strtotime("+".($redeemInfo['duration_value'] * 6)." month", $currentTime);
+                $duration = $expiredTime - $currentTime;
                 $orderPeriod = 'half_year_price';
-                $days = $redeemInfo['duration_value'] * 180;
+                $days = ceil($duration / 86400);
                 break;
             case 'year':
-                $duration = $redeemInfo['duration_value'] * 365 * 86400;
+                // 计算年（12个月或365/366天）
+                $expiredTime = strtotime("+{$redeemInfo['duration_value']} year", $currentTime);
+                $duration = $expiredTime - $currentTime;
                 $orderPeriod = 'year_price';
-                $days = $redeemInfo['duration_value'] * 365;
+                $days = ceil($duration / 86400);
                 break;
             default:
+                // 默认情况，按天计算
                 $duration = $redeemInfo['duration_value'] * 86400;
-                $orderPeriod = 'month_price'; // 默认按月
-                $days = $redeemInfo['duration_value'] * 30;
+                $expiredTime = $currentTime + $duration;
+                $orderPeriod = 'month_price';
+                $days = $redeemInfo['duration_value'];
         }
-        $user->expired_at = time() + $duration;
+
+        // 使用计算出的过期时间而不是通过duration计算
+        $user->expired_at = $expiredTime;
         $user->save();
         $giftDays = round($days, 2); // 保留两位小数
         // 创建赠送订单记录
