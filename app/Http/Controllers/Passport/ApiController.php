@@ -645,10 +645,11 @@ class ApiController extends Controller
         $order->save();
 
         // 11. 处理佣金 - 注册佣金
+        /*
         if ($user->invite_user_id && (int)config('v2board.commission_status', 0) == 1) {
             $this->processCommissionForRegistration($user);
         }
-
+        */
         return response()->json([
             'data' => $authService->generateAuthData($request)
         ]);
