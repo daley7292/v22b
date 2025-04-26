@@ -972,7 +972,6 @@ class ApiController extends Controller
      */
     public function handleFirstOrderReward(Order $order)
     {
-
         // 1. 获取订单用户和其邀请人
         $user = User::find($order->user_id);
         if (!$user || !$user->invite_user_id) {
@@ -1008,11 +1007,11 @@ class ApiController extends Controller
             return;
         }
 
-        // 4. 检查邀请人是否已获得该用户的奖励
-        if ($inviter->has_received_inviter_reward) {
-            \Log::info('邀请人已获得过该用户的奖励', [
-                'inviter_id' => $inviter->id,
-                'user_id' => $user->id
+        // 4. 检查被邀请用户是否已经触发过奖励
+        if ($user->has_triggered_invite_reward) {
+            \Log::info('该用户已经为邀请人带来过奖励', [
+                'user_id' => $user->id,
+                'inviter_id' => $inviter->id
             ]);
             return;
         }
@@ -1039,9 +1038,9 @@ class ApiController extends Controller
             $orderService->setInvite($user);
             $rewardOrder->save();
 
-            // 标记邀请人已获得该用户的奖励
-            $inviter->has_received_inviter_reward = 1;
-            $inviter->save();
+            // 标记被邀请用户已触发奖励
+            $user->has_triggered_invite_reward = 1;
+            $user->save();
 
             // 更新邀请人有效期
             $this->updateInviterExpiry($inviter, $plan, $rewardOrder);
