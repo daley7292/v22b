@@ -471,22 +471,44 @@ class ApiController extends Controller
                 return;
             }
             // 创建赠送订单
-            $order = new Order();
-            $orderService = new OrderService($order);
-            $order->user_id = $user->invite_user_id;
-            $order->plan_id = $plan->id;
-            $order->period = 'month_price';
-            $order->trade_no = Helper::guid();
-            $order->total_amount = 0;
-            $order->status = 3;
-            $order->type = 6;
-            $orderService->setInvite($user);
-            $order->save();
-            // 更新邀请人信息
-            $inviter->has_received_inviter_reward = 1; // 标记已获得邀请奖励
+            $rewardOrder = new Order();
+            $orderService = new OrderService($rewardOrder);
+            $rewardOrder->user_id = $inviter->id;
+            $rewardOrder->plan_id = $plan->id;
 
-            // 计算并更新有效期
-            $this->updateInviterExpiry($inviter,$plan,$order);
+            // 从配置中读取赠送时长（小时）
+            $giftHours = (int)config('v2board.complimentary_package_duration', 720); // 默认30天
+
+            // 根据时长确定period
+            if ($giftHours <= 24 * 30) {
+                $rewardOrder->period = 'month_price';
+                $periodLabel = '月付';
+            } else if ($giftHours <= 24 * 90) {
+                $rewardOrder->period = 'quarter_price';
+                $periodLabel = '季付';
+            } else if ($giftHours <= 24 * 180) {
+                $rewardOrder->period = 'half_year_price';
+                $periodLabel = '半年付';
+            } else {
+                $rewardOrder->period = 'year_price';
+                $periodLabel = '年付';
+            }
+
+            // 计算赠送天数并设置
+            $giftDays = round($giftHours / 24, 2);
+            $rewardOrder->gift_days = $giftDays;
+
+            // ...其他设置不变
+            $rewardOrder->trade_no = Helper::guid();
+            $rewardOrder->total_amount = 0;
+            $rewardOrder->status = 3;
+            $rewardOrder->type = 6; // 首单奖励类型
+            $rewardOrder->invited_user_id = $user->id;
+            $orderService->setInvite($user);
+            $rewardOrder->save();
+
+            // 更新邀请人有效期 - 保持不变
+            $this->updateInviterExpiry($inviter, $plan, $rewardOrder);
         });
     }
 
@@ -1029,20 +1051,39 @@ class ApiController extends Controller
             $orderService = new OrderService($rewardOrder);
             $rewardOrder->user_id = $inviter->id;
             $rewardOrder->plan_id = $plan->id;
-            $rewardOrder->period = 'month_price';
+
+            // 从配置中读取赠送时长（小时）
+            $giftHours = (int)config('v2board.complimentary_package_duration', 720); // 默认30天
+
+            // 根据时长确定period
+            if ($giftHours <= 24 * 30) {
+                $rewardOrder->period = 'month_price';
+                $periodLabel = '月付';
+            } else if ($giftHours <= 24 * 90) {
+                $rewardOrder->period = 'quarter_price';
+                $periodLabel = '季付';
+            } else if ($giftHours <= 24 * 180) {
+                $rewardOrder->period = 'half_year_price';
+                $periodLabel = '半年付';
+            } else {
+                $rewardOrder->period = 'year_price';
+                $periodLabel = '年付';
+            }
+
+            // 计算赠送天数并设置
+            $giftDays = round($giftHours / 24, 2);
+            $rewardOrder->gift_days = $giftDays;
+
+            // ...其他设置不变
             $rewardOrder->trade_no = Helper::guid();
             $rewardOrder->total_amount = 0;
             $rewardOrder->status = 3;
             $rewardOrder->type = 6; // 首单奖励类型
-            $rewardOrder->invited_user_id = $user->id; // 记录来源用户
+            $rewardOrder->invited_user_id = $user->id;
             $orderService->setInvite($user);
             $rewardOrder->save();
 
-            // 标记被邀请用户已触发奖励
-            $user->has_triggered_invite_reward = 1;
-            $user->save();
-
-            // 更新邀请人有效期
+            // 更新邀请人有效期 - 保持不变
             $this->updateInviterExpiry($inviter, $plan, $rewardOrder);
 
             \Log::info('首次付费邀请奖励发放成功', [
