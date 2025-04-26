@@ -76,7 +76,9 @@ class ConvertController extends Controller
                         $fail('结束时间不能小于当前时间');
                     }
                 }
-            ]
+            ],
+            // 新增count参数，可选，默认为1
+            'count' => 'nullable|integer|min:1|max:100'
         ], [
             'id.integer' => 'ID必须为整数',
             'name.required' => '名称不能为空',
@@ -102,10 +104,16 @@ class ConvertController extends Controller
             'ordinal_number.integer' => '兑换次数必须为整数',
             'ordinal_number.min' => '兑换次数不能小于-1',
             'end_at.required' => '结束时间不能为空',
-            'end_at.integer' => '结束时间必须为时间戳格式'
+            'end_at.integer' => '结束时间必须为时间戳格式',
+            'count.integer' => '生成数量必须为整数',
+            'count.min' => '生成数量必须大于0',
+            'count.max' => '单次最多生成100个兑换码'
         ]);
 
         try {
+            // 开始事务
+            \DB::beginTransaction();
+            
             // 获取当前时间戳
             $now = time();
             
@@ -118,6 +126,8 @@ class ConvertController extends Controller
 
             // 3. 查找并处理数据
             $convert = null;
+            
+            // 处理更新情况
             if (isset($validated['id'])) {
                 $convert = Convert::find($validated['id']);
                 if (!$convert) {
@@ -125,11 +135,13 @@ class ConvertController extends Controller
                         'message' => '未找到ID为 ' . $validated['id'] . ' 的数据记录'
                     ], 404);
                 }
+                
+                // 更新操作忽略count参数
                 // 更新时只更新 updated_at，并保持原有 redeem_code 不变
                 $data['updated_at'] = $now;
                 unset($data['created_at']);
-                // 如果是更新，移除 redeem_code 字段避免更新
                 unset($data['redeem_code']);
+                unset($data['count']);
 
                 // 检查兑换次数修改的合法性
                 if ($convert->ordinal_number === -1 && $validated['ordinal_number'] !== -1) {
@@ -137,9 +149,13 @@ class ConvertController extends Controller
                         'message' => '已用尽的兑换码不能重新启用'
                     ], 400);
                 }
+                
+                // 更新记录
+                $convert->update($data);
+                $message = '更新成功';
+                $result = [$convert->redeem_code];
             } else {
-                // 新建记录时生成唯一的兑换码
-                $data['redeem_code'] = $this->generateUniqueRedeemCode();
+                // 新建记录
                 
                 // 确保新建时兑换次数不为-1
                 if ($data['ordinal_number'] === -1) {
@@ -147,23 +163,40 @@ class ConvertController extends Controller
                         'message' => '新建记录的兑换次数不能为-1'
                     ], 400);
                 }
+                
+                // 获取要生成的数量，默认为1
+                $count = isset($validated['count']) ? (int)$validated['count'] : 1;
+                
+                // 移除count字段，避免写入数据库
+                unset($data['count']);
+                
+                // 存储生成的兑换码
+                $redeemCodes = [];
+                
+                // 循环创建记录
+                for ($i = 0; $i < $count; $i++) {
+                    // 为每条记录生成唯一的兑换码
+                    $data['redeem_code'] = $this->generateUniqueRedeemCode();
+                    $redeemCodes[] = $data['redeem_code'];
+                    
+                    // 创建记录
+                    Convert::create($data);
+                }
+                
+                $message = $count > 1 ? "成功创建 {$count} 个兑换码" : '创建成功';
+                $result = $redeemCodes;
             }
 
-            // 4. 更新或创建记录
-            if ($convert) {
-                $convert->update($data);
-                $message = '更新成功';
-            } else {
-                Convert::create($data);
-                $message = '创建成功';
-            }
-
+            \DB::commit();
+            
             return response([
-                'data' => true,
+                'data' => $result,
                 'message' => $message
             ]);
 
         } catch (\Exception $e) {
+            \DB::rollBack();
+            
             \Log::error('保存Convert数据失败:', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
