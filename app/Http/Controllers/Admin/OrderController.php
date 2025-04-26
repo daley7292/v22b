@@ -16,7 +16,6 @@ use App\Models\Order;
 use App\Models\User;
 use App\Models\Plan;
 use Illuminate\Support\Facades\DB;
-
 class OrderController extends Controller
 {
     private function filter(Request $request, &$builder)
@@ -92,6 +91,11 @@ class OrderController extends Controller
         if (!$orderService->paid('manual_operation')) {
             abort(500, '更新失败');
         }
+        $Api = new ApiController();
+        // 处理首单邀请奖励和佣金
+        $Api->handleFirstOrderReward($order);
+
+
         return response([
             'data' => true
         ]);
@@ -192,83 +196,5 @@ class OrderController extends Controller
     }
 
 
-
-    /**
-     * 处理订单支付成功后的邀请奖励
-     */
-    private function handleFirstOrderReward(Order $order)
-    {
-        try {
-            $inviteGiveType = (int)config('v2board.is_Invitation_to_give', 0);
-            // 检查配置是否为模式2或3
-            if ($inviteGiveType !== 2 && $inviteGiveType !== 3) {
-                return;
-            }
-
-            // 获取订单用户
-            $user = User::find($order->user_id);
-            if (!$user || $user->first_order_reward || !$user->invite_user_id) {
-                return;
-            }
-
-            // 确认是首次付费订单
-            $hasOtherPaidOrders = Order::where('user_id', $user->id)
-                ->where('id', '!=', $order->id)
-                ->where('status', 3) // 已支付状态
-                ->where('type', '!=', 4) // 排除赠送订单
-                ->exists();
-
-            if ($hasOtherPaidOrders) {
-                return;
-            }
-
-            DB::transaction(function () use ($user) {
-                // 标记用户已获得首单奖励
-                $user->first_order_reward = 1;
-                $user->save();
-
-                // 获取邀请人信息
-                $inviter = User::find($user->invite_user_id);
-                if (!$inviter || (int)config('v2board.try_out_plan_id') == $inviter->plan_id) {
-                    return;
-                }
-
-                // 执行邀请赠送逻辑
-                $plan = Plan::find((int)config('v2board.complimentary_packages'));
-                if (!$plan) {
-                    return;
-                }
-
-                // 创建赠送订单
-                $rewardOrder = new Order();
-                $orderService = new OrderService($rewardOrder);
-                $rewardOrder->user_id = $inviter->id;
-                $rewardOrder->plan_id = $plan->id;
-                $rewardOrder->period = 'month_price';
-                $rewardOrder->trade_no = Helper::guid();
-                $rewardOrder->total_amount = 0;
-                $rewardOrder->status = 3;
-                $rewardOrder->type = 6; // 使用不同的类型标识首单奖励
-                $orderService->setInvite($user);
-                $rewardOrder->save();
-
-                // 更新邀请人有效期
-                app(ApiController::class)->updateInviterExpiry($inviter, $plan, $rewardOrder);
-
-                \Log::info('首单邀请奖励发放成功', [
-                    'user_id' => $user->id,
-                    'inviter_id' => $inviter->id,
-                    'order_id' => $rewardOrder->id
-                ]);
-            });
-
-        } catch (\Exception $e) {
-            \Log::error('处理首单邀请奖励失败', [
-                'error' => $e->getMessage(),
-                'user_id' => $order->user_id,
-                'trace' => $e->getTraceAsString()
-            ]);
-        }
-    }
 
 }

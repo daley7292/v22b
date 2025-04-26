@@ -493,7 +493,7 @@ class ApiController extends Controller
     /**
      * 更新邀请人的有效期 - 支持套餐叠加和套餐抵扣
      */
-    private function updateInviterExpiry(User $inviter, Plan $newPlan, Order $order)
+    public function updateInviterExpiry(User $inviter, Plan $newPlan, Order $order)
     {
         try {
             $currentPlan = Plan::find($inviter->plan_id);
@@ -970,7 +970,7 @@ class ApiController extends Controller
     /**
      * 处理首次付费邀请奖励
      */
-    private function handleFirstOrderReward(Order $order)
+    public function handleFirstOrderReward(Order $order)
     {
 
         // 1. 获取订单用户和其邀请人
