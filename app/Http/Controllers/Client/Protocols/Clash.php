@@ -35,10 +35,10 @@ class Clash
             try {
                 if (\File::exists($customConfig)) {
                     $config = Yaml::parseFile($customConfig);
-                    var_dump('使用自定义配置文件');
+                    //var_dump('使用自定义配置文件');
                 } else {
                     $config = Yaml::parseFile($defaultConfig);
-                    var_dump('使用默认配置文件');
+                    //var_dump('使用默认配置文件');
                 }
             } catch (\Exception $e) {
                 \Log::error('配置文件解析失败', ['error' => $e->getMessage()]);
