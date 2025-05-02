@@ -28,7 +28,7 @@ CREATE TABLE `v2_commission_log`  (
   `invite_user_id` int(11) NOT NULL,
   `user_id` int(11) NOT NULL,
   `trade_no` char(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
-  `note` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_uca1400_ai_ci NULL DEFAULT NULL COMMENT '佣金备注',
+  `note` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '佣金备注',
   `order_amount` int(11) NOT NULL,
   `get_amount` int(11) NOT NULL,
   `created_at` int(11) NOT NULL,
@@ -42,20 +42,20 @@ CREATE TABLE `v2_commission_log`  (
 DROP TABLE IF EXISTS `v2_convert`;
 CREATE TABLE `v2_convert`  (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_uca1400_ai_ci NULL DEFAULT NULL COMMENT '兑换码名称',
+  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '兑换码名称',
   `plan_id` int(11) NULL DEFAULT NULL COMMENT '兑换套餐ID',
   `ordinal_number` int(11) NOT NULL DEFAULT 0 COMMENT '兑换次数，0为不限制',
-  `duration_unit` enum('month','quarter','half_year','year') CHARACTER SET utf8mb4 COLLATE utf8mb4_uca1400_ai_ci NOT NULL COMMENT '存储时间单位（月、季度、半年、年）',
+  `duration_unit` enum('month','quarter','half_year','year') CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '存储时间单位（月、季度、半年、年）',
   `duration_value` int(11) NOT NULL DEFAULT 0 COMMENT '兑换几个季度',
-  `redeem_code` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_uca1400_ai_ci NOT NULL COMMENT '兑换码',
-  `email` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_uca1400_ai_ci NULL DEFAULT NULL COMMENT '绑定上级邀请邮箱',
+  `redeem_code` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '兑换码',
+  `email` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '绑定上级邀请邮箱',
   `is_invitation` tinyint(4) NULL DEFAULT NULL COMMENT '0不是 1 是，用来判断是否要强制输入邀请码',
   `created_at` int(11) NULL DEFAULT NULL COMMENT 'Creation Time',
   `updated_at` int(11) NULL DEFAULT NULL COMMENT 'Update Time',
   `deleted_at` int(11) NULL DEFAULT NULL COMMENT 'Deletion Time',
   `end_at` int(11) NULL DEFAULT NULL COMMENT '兑换码到期时间',
   PRIMARY KEY (`id`, `duration_unit`) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 2 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_uca1400_ai_ci ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 2 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for v2_coupon
@@ -118,7 +118,7 @@ CREATE TABLE `v2_knowledge`  (
 DROP TABLE IF EXISTS `v2_log`;
 CREATE TABLE `v2_log`  (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `title` varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_uca1400_ai_ci NOT NULL,
+  `title` varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
   `level` varchar(11) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL,
   `host` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL,
   `uri` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
@@ -260,16 +260,16 @@ CREATE TABLE `v2_plan`  (
 DROP TABLE IF EXISTS `v2_rule`;
 CREATE TABLE `v2_rule`  (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_uca1400_ai_ci NULL DEFAULT NULL,
+  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL,
   `sort` int(11) NULL DEFAULT 0 COMMENT '排序',
   `port` int(11) NULL DEFAULT NULL COMMENT '端口',
-  `domain` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_uca1400_ai_ci NULL DEFAULT NULL COMMENT '要替换的域名',
-  `ua` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_uca1400_ai_ci NOT NULL COMMENT 'ua匹配信息',
-  `server_arr` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_uca1400_ai_ci NULL DEFAULT NULL COMMENT '用逗号分割分组id',
+  `domain` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '要替换的域名',
+  `ua` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'ua匹配信息',
+  `server_arr` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '用逗号分割分组id',
   `created_at` int(11) NOT NULL,
   `updated_at` int(11) NOT NULL,
   PRIMARY KEY (`id`) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 2 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_uca1400_ai_ci ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 2 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for v2_server_group
@@ -549,7 +549,7 @@ CREATE TABLE `v2_user`  (
   `is_admin` tinyint(1) NOT NULL DEFAULT 0,
   `last_login_at` int(11) NULL DEFAULT NULL,
   `is_staff` tinyint(1) NOT NULL DEFAULT 0,
-  `last_login_ip` int(11) NULL DEFAULT NULL,
+  `last_login_ip` varchar(255) NULL DEFAULT NULL,
   `uuid` varchar(36) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci NOT NULL,
   `group_id` int(11) NULL DEFAULT NULL,
   `plan_id` int(11) NULL DEFAULT NULL,
