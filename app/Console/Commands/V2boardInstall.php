@@ -74,18 +74,86 @@ class V2boardInstall extends Command
             if (!$file) {
                 abort(500, '数据库文件不存在');
             }
-            $sql = str_replace("\n", "", $file);
-            $sql = preg_split("/;/", $sql);
-            if (!is_array($sql)) {
-                abort(500, '数据库文件格式有误');
-            }
-            $this->info('正在导入数据库请稍等...');
-            foreach ($sql as $item) {
-                try {
-                    DB::select(DB::raw($item));
-                } catch (\Exception $e) {
+
+            // 移除注释和多余的空格
+            $file = preg_replace('/\/\*.*?\*\//s', '', $file); // 移除多行注释
+            $file = preg_replace('/--.*$/m', '', $file); // 移除单行注释
+            $file = preg_replace('/^\s*$/m', '', $file); // 移除空行
+
+            // 按分号分割，但排除字符串中的分号
+            $sql = [];
+            $current = '';
+            $inString = false;
+            $stringChar = '';
+            $escaped = false;
+
+            for ($i = 0; $i < strlen($file); $i++) {
+                $char = $file[$i];
+                
+                if ($escaped) {
+                    $current .= $char;
+                    $escaped = false;
+                    continue;
+                }
+                
+                if ($char === '\\') {
+                    $escaped = true;
+                    $current .= $char;
+                    continue;
+                }
+                
+                if (($char === "'" || $char === '"') && !$escaped) {
+                    if (!$inString) {
+                        $inString = true;
+                        $stringChar = $char;
+                    } else if ($char === $stringChar) {
+                        $inString = false;
+                    }
+                }
+                
+                if ($char === ';' && !$inString) {
+                    $current = trim($current);
+                    if (!empty($current)) {
+                        $sql[] = $current;
+                    }
+                    $current = '';
+                } else {
+                    $current .= $char;
                 }
             }
+
+            // 添加最后一个语句（如果没有以分号结尾）
+            $current = trim($current);
+            if (!empty($current)) {
+                $sql[] = $current;
+            }
+
+            if (empty($sql)) {
+                abort(500, '没有找到有效的 SQL 语句');
+            }
+
+            $this->info('正在导入数据库请稍等...');
+            $errors = [];
+
+            foreach ($sql as $index => $item) {
+                try {
+                    if (empty(trim($item))) {
+                        continue;
+                    }
+                    DB::statement($item);
+                } catch (\Exception $e) {
+                    $errors[] = "SQL 语句 #{$index} 执行失败: " . $e->getMessage();
+                }
+            }
+
+            if (!empty($errors)) {
+                $this->error('数据库导入过程中出现以下错误：');
+                foreach ($errors as $error) {
+                    $this->error($error);
+                }
+                abort(500, '数据库导入失败');
+            }
+
             $this->info('数据库导入完成');
             $email = '';
             while (!$email) {
