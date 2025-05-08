@@ -560,7 +560,6 @@ CREATE TABLE `v2_user` (
   `t` int(11) NOT NULL DEFAULT 0,
   `u` bigint(20) NOT NULL DEFAULT 0,
   `d` bigint(20) NOT NULL DEFAULT 0,
-  `ip_limit` int(11) DEFAULT NULL,
   `transfer_enable` bigint(20) NOT NULL DEFAULT 0,
   `banned` tinyint(1) NOT NULL DEFAULT 0,
   `is_admin` tinyint(1) NOT NULL DEFAULT 0,
@@ -571,14 +570,19 @@ CREATE TABLE `v2_user` (
   `group_id` int(11) DEFAULT NULL,
   `plan_id` int(11) DEFAULT NULL,
   `speed_limit` int(11) DEFAULT NULL,
+  `remind_expire` tinyint(4) DEFAULT 1,
+  `remind_traffic` tinyint(4) DEFAULT 1,
   `token` char(32) NOT NULL,
+  `expired_at` bigint(20) DEFAULT 0,
+  `remarks` text DEFAULT NULL,
   `created_at` int(11) NOT NULL,
   `updated_at` int(11) NOT NULL,
+  `delete_reason` varchar(255) DEFAULT NULL,
+  `deleted_at` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `email` (`email`),
-  UNIQUE KEY `uuid` (`uuid`),
   KEY `invite_user_id` (`invite_user_id`),
-  KEY `telegram_id` (`telegram_id`)
+  KEY `telegram_id` (`telegram_id`),
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------
