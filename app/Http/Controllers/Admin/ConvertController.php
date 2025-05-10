@@ -66,7 +66,7 @@ class ConvertController extends Controller
             'duration_unit' => 'required|string|in:day,month,year,quarter,half_year,onetime',
             'duration_value' => 'required|integer|min:1',
             'is_invitation' => 'required|integer|in:0,1',
-            'email' => 'required|string|email|max:255',
+            'email' => 'nullable|string|email|max:255',
             'ordinal_number' => 'required|integer|min:-1', // 允许-1(已用尽)、0(无限制)和正整数
             'end_at' => [
                 'required',
@@ -96,7 +96,6 @@ class ConvertController extends Controller
             'is_invitation.required' => '邀请开关不能为空',
             'is_invitation.integer' => '邀请开关必须为整数',
             'is_invitation.in' => '邀请开关只能是0或1',
-            'email.required' => '邮箱不能为空',
             'email.string' => '邮箱必须为字符串',
             'email.email' => '邮箱格式不正确',
             'email.max' => '邮箱最大长度为255个字符',
