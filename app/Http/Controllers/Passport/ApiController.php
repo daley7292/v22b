@@ -747,6 +747,7 @@ class ApiController extends Controller
         //$this->handleInvitePresent($user);  //取消赠送逻辑
 
         // 10. 处理订单记录
+        /*
         $tryOutHours = (int)config('v2board.try_out_hour', 1);
         $plan = Plan::find(config('v2board.try_out_plan_id'));
         $giftDays = round($tryOutHours / 24, 2); // 保留两位小数
@@ -761,7 +762,7 @@ class ApiController extends Controller
         $order->gift_days = $giftDays; // 赠送天数
         $order->redeem_code = ''; // 添加空字符串作为默认值
         $order->save();
-
+        */
         // 11. 处理佣金 - 注册佣金
         /*
         if ($user->invite_user_id && (int)config('v2board.commission_status', 0) == 1) {
