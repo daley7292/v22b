@@ -680,8 +680,12 @@ class ApiController extends Controller
             if (!$redeemInfo) {
                 abort(400, '您的兑换码有误');
             }
-            // 设置邀请人ID
-            $request->merge(['invite_user_id' => $redeemInfo['user_id']]);
+            // 只有当兑换码指定了邀请关系要求，且提供了关联用户时才设置邀请人ID
+            if (isset($redeemInfo['is_invitation']) && 
+                $redeemInfo['is_invitation'] == 1 && 
+                !empty($redeemInfo['user_id'])) {
+                $request->merge(['invite_user_id' => $redeemInfo['user_id']]);
+            }
         } elseif ($request->filled('invite_code')) {
             // 推广码注册流程
             $this->validateInviteCode($request);
@@ -723,14 +727,23 @@ class ApiController extends Controller
         }
         $authService = new AuthService($user);
         // 8. 根据不同注册模式处理套餐分配
-        if ($request->filled('redeem_code')) { // 这里改成 filled
+        if ($request->filled('redeem_code')) { 
             $this->handleRedeemPlan($user, $redeemInfo);
-            // 处理邀请奖励
+            
+            // 处理邀请奖励 - 修改这里
             $inviteGiveType = (int)config('v2board.is_Invitation_to_give', 0);
             if ($inviteGiveType === 1 || $inviteGiveType === 3) {
-                $AuthController =new AuthController();
-                $AuthController->handleInviteCode($request,$user);
+                // 调用正确的函数处理邀请赠送
+                $this->handleInvitePresent($user);
+                
+                // 记录日志
+                \Log::info('兑换码注册 - 处理邀请赠送', [
+                    'user_id' => $user->id,
+                    'invite_user_id' => $user->invite_user_id,
+                    'invite_type' => $inviteGiveType
+                ]);
             }
+            
             return response()->json([
                 'data' => $authService->generateAuthData($request)
             ]);
@@ -781,7 +794,6 @@ class ApiController extends Controller
      */
     public function validateRedeemCode($redeemCode)
     {
-
         if (empty($redeemCode)) {
             return null;
         }
@@ -799,10 +811,15 @@ class ApiController extends Controller
             abort(400, '该兑换码已无法使用');
         }
 
-        $User=\App\Models\User::where('email', $convert->email)->first();
-        if (!$User) {
-            return null;
+        // 移除强制邮箱检查，只在有邮箱时进行关联
+        $userId = null;
+        if (!empty($convert->email)) {
+            $User = \App\Models\User::where('email', $convert->email)->first();
+            if ($User) {
+                $userId = $User->id;
+            }
         }
+
         // 检查是否需要更新兑换次数
         if ($convert->ordinal_number > 0) {
             if ($convert->ordinal_number === 1) {
@@ -812,12 +829,15 @@ class ApiController extends Controller
             }
             $convert->save();
         }
+        
         return [
             'plan_id' => $convert->plan_id,
             'duration_unit' => $convert->duration_unit,
             'duration_value' => $convert->duration_value,
             'redeem_code' => $redeemCode,
-            'user_id' => $User->id
+            'user_id' => $userId,
+            'is_invitation' => $convert->is_invitation ?? 0, // 添加是否需要邀请关系标志
+            'email' => $convert->email ?? '' // 添加关联邮箱
         ];
     }
 
@@ -826,93 +846,136 @@ class ApiController extends Controller
      */
     public function handleRedeemPlan(User $user, array $redeemInfo)
     {
-        $plan = Plan::find($redeemInfo['plan_id']);
-        if (!$plan) {
+        // 1. 获取兑换码对应的套餐
+        $newPlan = Plan::find($redeemInfo['plan_id']);
+        if (!$newPlan) {
             return false;
         }
 
-        // 设置用户套餐信息
-        $user->transfer_enable = $plan->transfer_enable * 1073741824;
-        $user->plan_id = $plan->id;
-        $user->group_id = $plan->group_id;
-
-        // 计算到期时间和订单周期
+        // 2. 获取当前时间和用户当前套餐
         $currentTime = time();
-        $duration = 0;
+        $currentPlan = null;
+        $remainingSeconds = 0;
+        $isSamePlan = false;
+        
+        if ($user->plan_id) {
+            $currentPlan = Plan::find($user->plan_id);
+            // 计算当前套餐剩余时间（秒）
+            $remainingSeconds = max(0, $user->expired_at - $currentTime);
+            $isSamePlan = $currentPlan && $currentPlan->id == $newPlan->id;
+        }
+
+        // 3. 计算新套餐的周期和到期时间
         $orderPeriod = '';
-        $days = 0; // 用于计算赠送天数
+        $expiredTime = $currentTime;
+        $days = 0;
 
         switch ($redeemInfo['duration_unit']) {
             case 'month':
-                // 使用strtotime计算准确的月份时间
                 $expiredTime = strtotime("+{$redeemInfo['duration_value']} month", $currentTime);
-                $duration = $expiredTime - $currentTime;
                 $orderPeriod = 'month_price';
-                // 计算精确天数
-                $days = ceil($duration / 86400);
                 break;
             case 'quarter':
-                // 计算准确的季度（3个月）
                 $expiredTime = strtotime("+".($redeemInfo['duration_value'] * 3)." month", $currentTime);
-                $duration = $expiredTime - $currentTime;
                 $orderPeriod = 'quarter_price';
-                $days = ceil($duration / 86400);
                 break;
             case 'half_year':
-                // 计算半年（6个月）
                 $expiredTime = strtotime("+".($redeemInfo['duration_value'] * 6)." month", $currentTime);
-                $duration = $expiredTime - $currentTime;
                 $orderPeriod = 'half_year_price';
-                $days = ceil($duration / 86400);
                 break;
             case 'year':
-                // 计算年（12个月或365/366天）
                 $expiredTime = strtotime("+{$redeemInfo['duration_value']} year", $currentTime);
-                $duration = $expiredTime - $currentTime;
                 $orderPeriod = 'year_price';
-                $days = ceil($duration / 86400);
                 break;
-            default:
-                // 默认情况，按天计算
-                $duration = $redeemInfo['duration_value'] * 86400;
-                $expiredTime = $currentTime + $duration;
+            default: // 按天计算
+                $durationSeconds = $redeemInfo['duration_value'] * 86400;
+                $expiredTime = $currentTime + $durationSeconds;
                 $orderPeriod = 'month_price';
-                $days = $redeemInfo['duration_value'];
+        }
+        
+        $durationSeconds = $expiredTime - $currentTime;
+        $days = ceil($durationSeconds / 86400);
+        
+        // 4. 处理套餐逻辑
+        if ($isSamePlan) {
+            // 相同套餐 - 叠加时间
+            $finalExpiredTime = $user->expired_at > $currentTime 
+                ? $user->expired_at + $durationSeconds
+                : $expiredTime;
+            \Log::info('兑换码：相同套餐叠加时间', [
+                'user_id' => $user->id,
+                'plan_id' => $newPlan->id,
+                'old_expired' => date('Y-m-d H:i:s', $user->expired_at),
+                'new_expired' => date('Y-m-d H:i:s', $finalExpiredTime),
+                'added_days' => $days
+            ]);
+        } else {
+            // 不同套餐 - 检查是否启用套餐抵扣
+            $enablePlanDeduction = (int)config('v2board.plan_change_enable', 1) === 1;
+            
+            if ($currentPlan && $remainingSeconds > 0 && $enablePlanDeduction) {
+                // 计算当前套餐剩余价值
+                $monthlyPrice = $currentPlan->month_price / 100; // 转为元
+                if ($monthlyPrice > 0) {
+                    $hoursInMonth = 720; // 30天 * 24小时
+                    $hourlyPrice = $monthlyPrice / $hoursInMonth;
+                    $remainingHours = $remainingSeconds / 3600;
+                    $remainingValue = $remainingHours * $hourlyPrice;
+                    
+                    // 将剩余价值添加到余额
+                    $user->balance = $user->balance + $remainingValue;
+                    \Log::info('兑换码：不同套餐计算抵扣', [
+                        'user_id' => $user->id,
+                        'old_plan' => $currentPlan->id,
+                        'new_plan' => $newPlan->id,
+                        'remaining_value' => $remainingValue,
+                        'new_balance' => $user->balance
+                    ]);
+                }
+            } else {
+                \Log::info('兑换码：直接覆盖套餐', [
+                    'user_id' => $user->id,
+                    'old_plan' => $user->plan_id,
+                    'new_plan' => $newPlan->id
+                ]);
+            }
+            
+            $finalExpiredTime = $expiredTime;
         }
 
-        // 使用计算出的过期时间而不是通过duration计算
-        $user->expired_at = $expiredTime;
+        // 5. 更新用户套餐信息
+        $user->transfer_enable = $newPlan->transfer_enable * 1073741824;
+        $user->plan_id = $newPlan->id;
+        $user->group_id = $newPlan->group_id;
+        $user->expired_at = $finalExpiredTime;
         $user->save();
-        $giftDays = round($days, 2); // 保留两位小数
-        // 创建赠送订单记录
+
+        // 6. 创建订单记录
         try {
             $order = new Order();
             $orderService = new OrderService($order);
             $order->user_id = $user->id;
-            $order->plan_id = $plan->id;
+            $order->plan_id = $newPlan->id;
             $order->period = $orderPeriod;
             $order->trade_no = Helper::guid();
-            $order->total_amount = 0; // 赠送订单金额为0
-            $order->status = 3; // 已完成状态
-            $order->type = 5; // 赠送类型 4 试用 5兑换 6 推广赠送
-            $order->redeem_code = $redeemInfo['redeem_code']; // 记录兑换码
-            $order->gift_days = $giftDays; // 赠送天数
+            $order->total_amount = 0;
+            $order->status = 3;
+            $order->type = 5; // 5兑换
+            $order->redeem_code = $redeemInfo['redeem_code']; 
+            $order->gift_days = round($days, 2);
             $order->invite_user_id = $redeemInfo['user_id'];
-            // 保存订单
+            
             if (!$order->save()) {
-                \Log::error('兑换码赠送订单创建失败:', [
+                \Log::error('兑换码订单创建失败', [
                     'user_id' => $user->id,
-                    'plan_id' => $plan->id,
-                    'redeem_code' => $redeemInfo['redeem_code']
+                    'plan_id' => $newPlan->id
                 ]);
                 return false;
-            }else{
-                return true;
             }
+            return true;
         } catch (\Exception $e) {
-            \Log::error('兑换码赠送订单异常:', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+            \Log::error('兑换码订单异常', [
+                'error' => $e->getMessage()
             ]);
             return false;
         }
