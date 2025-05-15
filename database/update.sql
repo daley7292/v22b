@@ -17,6 +17,8 @@ CREATE TABLE `v2_convert`  (
                                PRIMARY KEY (`id`, `duration_unit`) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_uca1400_ai_ci ROW_FORMAT = DYNAMIC;
 
+ALTER TABLE v2_convert MODIFY COLUMN duration_unit ENUM('day','month','year','quarter','half_year','onetime');
+
 ALTER TABLE `v2_coupon` ADD COLUMN `limit_inviter_ids` varchar(255) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci NOT NULL AFTER `updated_at`;
 
 ALTER TABLE `v2_log` MODIFY COLUMN `title` varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_uca1400_ai_ci NOT NULL AFTER `id`;
