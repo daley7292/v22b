@@ -327,17 +327,66 @@ class UserController extends Controller
             $Api = new ApiController();
             $redeemInfo = $Api->validateRedeemCode($request->input('redeem_code'));
             
+            // 兑换码验证失败
             if (!$redeemInfo) {
                 DB::rollBack();
                 return response([
                     'data' => [
                         'state' => false,
-                        'msg' => '您的兑换码有误'
+                        'msg' => '您的兑换码有误或已被使用'
                     ]
                 ], 400);
             }
             
-            if ($Api->handleRedeemPlan($user, $redeemInfo)) {
+            // 验证是否需要绑定邀请人
+            if (isset($redeemInfo['is_invitation']) && $redeemInfo['is_invitation'] == 1) {
+                if (!$user->invite_user_id) {
+                    DB::rollBack();
+                    return response([
+                        'data' => [
+                            'state' => false,
+                            'msg' => '此兑换码需要您的账户已绑定邀请人才能使用'
+                        ]
+                    ], 400);
+                }
+            }
+            
+            // 验证兑换码所属者与用户邮箱是否匹配（如果兑换码有指定邮箱）
+            if (isset($redeemInfo['email']) && !empty($redeemInfo['email'])) {
+                if ($user->email !== $redeemInfo['email']) {
+                    DB::rollBack();
+                    return response([
+                        'data' => [
+                            'state' => false,
+                            'msg' => '此兑换码已绑定其他邮箱账户，您无法使用'
+                        ]
+                    ], 400);
+                }
+            }
+            
+            // 尝试处理兑换
+            $result = $Api->handleRedeemPlan($user, $redeemInfo);
+            if (is_array($result)) {
+                // 如果返回数组，说明是携带错误信息的结果
+                if (!$result['success']) {
+                    DB::rollBack();
+                    return response([
+                        'data' => [
+                            'state' => false,
+                            'msg' => $result['message'] ?? '兑换失败'
+                        ]
+                    ], 400);
+                }
+                
+                DB::commit();
+                return response([
+                    'data' => [
+                        'state' => true,
+                        'msg' => $result['message'] ?? '兑换成功'
+                    ]
+                ]);
+            } else if ($result === true) {
+                // 兑换成功
                 DB::commit();
                 return response([
                     'data' => [
@@ -346,16 +395,23 @@ class UserController extends Controller
                     ]
                 ]);
             } else {
+                // 兑换失败
                 DB::rollBack();
                 return response([
                     'data' => [
                         'state' => false,
-                        'msg' => '兑换失败'
+                        'msg' => '兑换失败，请确认兑换码是否有效'
                     ]
                 ]);
             }
         } catch (\Exception $e) {
             DB::rollBack();
+            \Log::error('兑换码兑换失败', [
+                'user_id' => $user_id,
+                'code' => $request->input('redeem_code'),
+                'error' => $e->getMessage()
+            ]);
+            
             return response([
                 'data' => [
                     'state' => false,
