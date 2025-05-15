@@ -287,7 +287,7 @@ class AuthController extends Controller
                 $user->group_id = $plan->group_id;
                 $user->expired_at = time() + (config('v2board.try_out_hour', 1) * 3600);
                 $user->speed_limit = $plan->speed_limit;
-
+                /*
                 $tryOutHours = (int)config('v2board.try_out_hour', 1);
                 $giftDays = round($tryOutHours / 24, 2); // 保留两位小数
                 $order = new Order();
@@ -301,6 +301,7 @@ class AuthController extends Controller
                 $order->gift_days = $giftDays; // 赠送天数
                 $order->redeem_code = ''; // 添加空字符串作为默认值
                 $order->save();
+                */
             }
         } else {
             $user->transfer_enable = 0;
