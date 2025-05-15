@@ -58,6 +58,8 @@ CREATE TABLE `v2_convert` (
   KEY `redeem_code` (`redeem_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+ALTER TABLE v2_convert MODIFY COLUMN duration_unit ENUM('day','month','year','quarter','half_year','onetime');
+
 -- ----------------------------
 -- Table structure for v2_coupon
 -- ----------------------------
