@@ -332,8 +332,6 @@ class AuthController extends Controller
                 'inviter_id' => $user->invite_user_id,
                 'trace' => $e->getTraceAsString()
             ]);
-            var_dump($e->getMessage());
-            exit('666666');
         }
     }
 
