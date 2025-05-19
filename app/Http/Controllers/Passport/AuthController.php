@@ -233,8 +233,29 @@ class AuthController extends Controller
             
             // 获取邀请人当前套餐
             $inviterCurrentPlan = Plan::find($inviter->plan_id);
-            if (!$inviterCurrentPlan || $inviterCurrentPlan->month_price <= 0 || $rewardPlan->month_price <= 0) {
-                \Log::warning('套餐价格异常，使用默认赠送时间', [
+            if (!$inviterCurrentPlan) {
+                return;
+            }
+
+            // 检查套餐价格有效性
+            $rewardHasValidPrice = $rewardPlan->month_price > 0 || 
+                $rewardPlan->quarter_price > 0 || 
+                $rewardPlan->half_year_price > 0 || 
+                $rewardPlan->year_price > 0 || 
+                $rewardPlan->two_year_price > 0 || 
+                $rewardPlan->three_year_price > 0 || 
+                $rewardPlan->onetime_price > 0;
+
+            $inviterHasValidPrice = $inviterCurrentPlan->month_price > 0 || 
+                $inviterCurrentPlan->quarter_price > 0 || 
+                $inviterCurrentPlan->half_year_price > 0 || 
+                $inviterCurrentPlan->year_price > 0 || 
+                $inviterCurrentPlan->two_year_price > 0 || 
+                $inviterCurrentPlan->three_year_price > 0 || 
+                $inviterCurrentPlan->onetime_price > 0;
+
+            if (!$inviterHasValidPrice || !$rewardHasValidPrice) {
+                \Log::warning('套餐价格异常，无法计算奖励', [
                     'inviter_id' => $inviter->id,
                     'reward_plan_id' => $rewardPlan->id,
                     'current_plan_id' => $inviter->plan_id
@@ -249,11 +270,17 @@ class AuthController extends Controller
                     $inviter->expired_at = $currentTime;
                 }
                 
+                // 计算奖励套餐的月均价值
+                $rewardMonthlyValue = $this->getMonthlyValue($rewardPlan);
+                
+                // 计算邀请人当前套餐的月均价值
+                $inviterMonthlyValue = $this->getMonthlyValue($inviterCurrentPlan);
+                
+                // 计算套餐价值比例：奖励套餐月均价值 / 邀请人套餐月均价值
+                $priceRatio = $rewardMonthlyValue / $inviterMonthlyValue;
+                
                 // 配置的赠送小时数
                 $configHours = (int)config('v2board.complimentary_package_duration', 1);
-                
-                // 计算套餐价值比例：奖励套餐价格 / 邀请人当前套餐价格
-                $priceRatio = $rewardPlan->month_price / $inviterCurrentPlan->month_price;
                 
                 // 根据价值比例折算实际赠送时间
                 $adjustedHours = $configHours * $priceRatio;
@@ -290,8 +317,8 @@ class AuthController extends Controller
                     'user_id' => $user->id,
                     'inviter_id' => $inviter->id,
                     'order_id' => $order->id,
-                    'reward_plan_price' => $rewardPlan->month_price,
-                    'current_plan_price' => $inviterCurrentPlan->month_price,
+                    'reward_monthly_value' => $rewardMonthlyValue,
+                    'inviter_monthly_value' => $inviterMonthlyValue,
                     'price_ratio' => $priceRatio,
                     'config_hours' => $configHours,
                     'adjusted_hours' => $adjustedHours,
@@ -306,6 +333,58 @@ class AuthController extends Controller
                 'trace' => $e->getTraceAsString()
             ]);
         }
+    }
+
+    /**
+     * 计算套餐的月均价值
+     * 考虑所有付费周期，取最优惠的月均价值（通常是更长周期付费）
+     */
+    private function getMonthlyValue($plan)
+    {
+        $monthlyValues = [];
+        
+        // 月付价格
+        if ($plan->month_price > 0) {
+            $monthlyValues[] = $plan->month_price;
+        }
+        
+        // 季付价格折算为月价格
+        if ($plan->quarter_price > 0) {
+            $monthlyValues[] = $plan->quarter_price / 3;
+        }
+        
+        // 半年付价格折算为月价格
+        if ($plan->half_year_price > 0) {
+            $monthlyValues[] = $plan->half_year_price / 6;
+        }
+        
+        // 年付价格折算为月价格
+        if ($plan->year_price > 0) {
+            $monthlyValues[] = $plan->year_price / 12;
+        }
+        
+        // 两年付价格折算为月价格
+        if ($plan->two_year_price > 0) {
+            $monthlyValues[] = $plan->two_year_price / 24;
+        }
+        
+        // 三年付价格折算为月价格
+        if ($plan->three_year_price > 0) {
+            $monthlyValues[] = $plan->three_year_price / 36;
+        }
+        
+        // 一次性付费，假设等同于年付折算
+        if ($plan->onetime_price > 0) {
+            $monthlyValues[] = $plan->onetime_price / 12;
+        }
+        
+        // 如果没有有效价格，返回1以避免除零错误
+        if (empty($monthlyValues)) {
+            return 1;
+        }
+        
+        // 返回最优惠的月均价值（最小值）
+        return min($monthlyValues);
     }
 
     private function handleTrialPlan(User $user)
