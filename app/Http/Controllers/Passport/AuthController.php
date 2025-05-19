@@ -236,7 +236,7 @@ class AuthController extends Controller
                     $inviter->expired_at = $currentTime;
                 }
                 //赠送套餐时长
-                $add_seconds = (int)config('v2board.complimentary_package_duration', 1) * 86400;
+                $add_seconds = (int)config('v2board.complimentary_package_duration', 1) * 3600;
                 $inviter->expired_at = $inviter->expired_at + $add_seconds;
                 // 将秒数转换为天数（保留原始计算精度）
                 $calculated_days = $add_seconds / 86400;
