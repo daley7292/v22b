@@ -72,9 +72,19 @@ class ResetTraffic extends Command
                         // year first day
                         case 3:
                             $this->resetByYearFirstDay($builder);
+                            break;
                         // year expire day
                         case 4:
                             $this->resetByExpireYear($builder);
+                            break;
+                        // quarter first day
+                        case 5:
+                            $this->resetByQuarterFirstDay($builder);
+                            break;
+                        // half year first day
+                        case 6:
+                            $this->resetByHalfYearFirstDay($builder);
+                            break;
                     }
                     break;
                 }
@@ -99,6 +109,16 @@ class ResetTraffic extends Command
                 case ($resetMethod['method'] === 4): {
                     $builder = with(clone($this->builder))->whereIn('plan_id', $planIds);
                     $this->resetByExpireYear($builder);
+                    break;
+                }
+                case ($resetMethod['method'] === 5): {
+                    $builder = with(clone($this->builder))->whereIn('plan_id', $planIds);
+                    $this->resetByQuarterFirstDay($builder);
+                    break;
+                }
+                case ($resetMethod['method'] === 6): {
+                    $builder = with(clone($this->builder))->whereIn('plan_id', $planIds);
+                    $this->resetByHalfYearFirstDay($builder);
                     break;
                 }
             }
@@ -161,4 +181,41 @@ class ResetTraffic extends Command
             'd' => 0
         ]);
     }
+
+
+    /**
+ * 季度第一天重置流量
+ * 每季度第一天（1月1日、4月1日、7月1日、10月1日）重置
+ */
+private function resetByQuarterFirstDay($builder):void
+{
+    $quarterFirstMonths = [1, 4, 7, 10]; // 季度的第一个月
+    $currentMonth = (int)date('m');
+    $currentDay = (string)date('d');
+    
+    if (in_array($currentMonth, $quarterFirstMonths) && $currentDay === '01') {
+        $builder->update([
+            'u' => 0,
+            'd' => 0
+        ]);
+    }
+}
+
+/**
+ * 半年第一天重置流量
+ * 每半年第一天（1月1日、7月1日）重置
+ */
+private function resetByHalfYearFirstDay($builder):void
+{
+    $halfYearFirstMonths = [1, 7]; // 半年的第一个月
+    $currentMonth = (int)date('m');
+    $currentDay = (string)date('d');
+    
+    if (in_array($currentMonth, $halfYearFirstMonths) && $currentDay === '01') {
+        $builder->update([
+            'u' => 0,
+            'd' => 0
+        ]);
+    }
+}
 }
