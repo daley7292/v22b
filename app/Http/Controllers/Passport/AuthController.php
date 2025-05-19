@@ -260,6 +260,8 @@ class AuthController extends Controller
                     'reward_plan_id' => $rewardPlan->id,
                     'current_plan_id' => $inviter->plan_id
                 ]);
+                var_dump($inviterHasValidPrice, $rewardHasValidPrice);
+                exit('尼马报错啦');
                 return; // 避免除零错误
             }
             
