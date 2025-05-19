@@ -260,8 +260,6 @@ class AuthController extends Controller
                     'reward_plan_id' => $rewardPlan->id,
                     'current_plan_id' => $inviter->plan_id
                 ]);
-                var_dump($inviterHasValidPrice, $rewardHasValidPrice);
-                exit('尼马报错啦');
                 return; // 避免除零错误
             }
             
@@ -334,6 +332,8 @@ class AuthController extends Controller
                 'inviter_id' => $user->invite_user_id,
                 'trace' => $e->getTraceAsString()
             ]);
+            var_dump($e->getMessage());
+            exit('666666');
         }
     }
 
