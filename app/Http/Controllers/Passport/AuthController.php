@@ -215,55 +215,87 @@ class AuthController extends Controller
         }
     }
 
-    // 处理邀请奖励
+    // 处理邀请奖励 - 根据套餐价值比例折算
     public function handleInviteReward(User $user)
     {
         try {
+            // 获取邀请人
             $inviter = User::find($user->invite_user_id);
             if (!$inviter || (int)config('v2board.try_out_plan_id') == $inviter->plan_id) {
                 return;
             }
-            //var_dump($inviter);exit();
-            $plan = Plan::find((int)config('v2board.complimentary_packages'));
-            if (!$plan) {
+            
+            // 获取奖励套餐(配置中设置的赠送套餐)
+            $rewardPlan = Plan::find((int)config('v2board.complimentary_packages'));
+            if (!$rewardPlan) {
                 return;
             }
-            DB::transaction(function () use ($user, $plan, $inviter) {
-
-                // 更新到期时间
+            
+            // 获取邀请人当前套餐
+            $inviterCurrentPlan = Plan::find($inviter->plan_id);
+            if (!$inviterCurrentPlan || $inviterCurrentPlan->month_price <= 0 || $rewardPlan->month_price <= 0) {
+                \Log::warning('套餐价格异常，使用默认赠送时间', [
+                    'inviter_id' => $inviter->id,
+                    'reward_plan_id' => $rewardPlan->id,
+                    'current_plan_id' => $inviter->plan_id
+                ]);
+                return; // 避免除零错误
+            }
+            
+            DB::transaction(function () use ($user, $rewardPlan, $inviterCurrentPlan, $inviter) {
+                // 初始化时间
                 $currentTime = time();
                 if ($inviter->expired_at === null || $inviter->expired_at < $currentTime) {
                     $inviter->expired_at = $currentTime;
                 }
-                //赠送套餐时长
-                $add_seconds = (int)config('v2board.complimentary_package_duration', 1) * 3600;
+                
+                // 配置的赠送小时数
+                $configHours = (int)config('v2board.complimentary_package_duration', 1);
+                
+                // 计算套餐价值比例：奖励套餐价格 / 邀请人当前套餐价格
+                $priceRatio = $rewardPlan->month_price / $inviterCurrentPlan->month_price;
+                
+                // 根据价值比例折算实际赠送时间
+                $adjustedHours = $configHours * $priceRatio;
+                $add_seconds = $adjustedHours * 3600; // 转换为秒
+                
+                // 更新邀请人到期时间
                 $inviter->expired_at = $inviter->expired_at + $add_seconds;
-                // 将秒数转换为天数（保留原始计算精度）
+                
+                // 将秒数转换为天数（用于显示）
                 $calculated_days = $add_seconds / 86400;
                 $formatted_days = number_format($calculated_days, 2, '.', '');
+                
                 // 创建赠送订单
                 $order = new Order();
                 $orderService = new OrderService($order);
                 $order->user_id = $inviter->id;
-                $order->plan_id = $plan->id;
-                $order->period = 'try_out';  //赠送标记位
+                $order->plan_id = $rewardPlan->id;
+                $order->period = 'try_out';  // 赠送标记位
                 $order->trade_no = Helper::guid();
                 $order->total_amount = 0;
                 $order->status = 3;
                 $order->type = 6;
                 $order->invited_user_id = $user->id;
                 $order->redeem_code = null;
-                $order->gift_days=$formatted_days;
+                $order->gift_days = $formatted_days;
                 $orderService->setInvite($user);
                 $order->save();
+                
                 // 更新邀请人状态
                 $inviter->has_received_inviter_reward = 1;
                 $inviter->save();
-
+                
                 \Log::info('注册邀请奖励发放成功', [
                     'user_id' => $user->id,
                     'inviter_id' => $inviter->id,
-                    'order_id' => $order->id
+                    'order_id' => $order->id,
+                    'reward_plan_price' => $rewardPlan->month_price,
+                    'current_plan_price' => $inviterCurrentPlan->month_price,
+                    'price_ratio' => $priceRatio,
+                    'config_hours' => $configHours,
+                    'adjusted_hours' => $adjustedHours,
+                    'gift_days' => $formatted_days
                 ]);
             });
         } catch (\Exception $e) {
