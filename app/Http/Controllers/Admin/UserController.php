@@ -514,76 +514,48 @@ class UserController extends Controller
             
             // 遍历每个时间周期
             foreach ($periods as $key => $periodInfo) {
-                // 添加在 foreach 循环前
-                \DB::enableQueryLog();
 
                 // 查询新购订单数量
-                $newPurchaseCount = \App\Models\Order::where([
-                    'invite_user_id' => $userId,
-                    'type' => 1, // 新购
-                    'status' => 3, // 已完成
-                    'period' => $periodInfo['period']
-                ])->count();
+            $newPurchaseCount = \App\Models\Order::where('invite_user_id', $userId)
+                ->where('type', 1) // 新购
+                ->where('status', 3) // 已完成
+                ->where('period', $periodInfo['period'])
+                ->count();
 
-                // 查询续费订单数量
-                $renewalCount = \App\Models\Order::where([
-                    'invite_user_id' => $userId,
-                    'type' => 2, // 续费
-                    'status' => 3, // 已完成
-                    'period' => $periodInfo['period']
-                ])->count();
+            // 查询续费订单数量
+            $renewalCount = \App\Models\Order::where('invite_user_id', $userId)
+                ->where('type', 2) // 续费
+                ->where('status', 3) // 已完成
+                ->where('period', $periodInfo['period'])
+                ->count();
 
-                // 获取订单金额统计
-                $newPurchaseAmount = \App\Models\Order::where([
-                    'invite_user_id' => $userId,
-                    'type' => 1,
-                    'status' => 3,
-                    'period' => $periodInfo['period']
-                ])->sum('total_amount');
+            // 获取订单金额统计
+            $newPurchaseAmount = \App\Models\Order::where('invite_user_id', $userId)
+                ->where('type', 1)
+                ->where('status', 3)
+                ->where('period', $periodInfo['period'])
+                ->sum('total_amount');
 
-                $renewalAmount = \App\Models\Order::where([
-                    'invite_user_id' => $userId,
-                    'type' => 2,
-                    'status' => 3,
-                    'period' => $periodInfo['period']
-                ])->sum('total_amount');
+            $renewalAmount = \App\Models\Order::where('invite_user_id', $userId)
+                ->where('type', 2)
+                ->where('status', 3)
+                ->where('period', $periodInfo['period'])
+                ->sum('total_amount');
 
-                // 获取佣金统计
+            // 获取佣金统计
             $newPurchaseCommission = \App\Models\Order::where('invite_user_id', $userId)
                 ->where('type','>=', 1)
-                ->where('status', 3)
+                ->where('status','>=', 3)
                 ->where('commission_status', '>=', 2) // 修改：大于等于2的佣金状态
                 ->where('period', $periodInfo['period'])
                 ->sum('commission_balance');
 
-                $query = \App\Models\Order::where('invite_user_id', $userId)
+            $renewalCommission = \App\Models\Order::where('invite_user_id', $userId)
                 ->where('type','>=', 1)
-                ->where('status', 3)
-                ->where('commission_status', '>=', 2) // 修改：大于等于2的佣金状态
-                ->where('period', $periodInfo['period']);
-                $newPurchaseCommission = $query->sum('commission_balance');
-
-                // 获取SQL而不执行查询
-                $sql = $query->toSql();
-                $bindings = $query->getBindings();
-                // 替换占位符以获得完整SQL
-                $fullSql = vsprintf(str_replace('?', "'%s'", $sql), $bindings);
-
-                // 打印SQL和期望值
-                echo "====== SQL调试 ======<br>";
-                echo "周期: " . $key . " (" . $periodInfo['period'] . ")<br>";
-                echo "SQL: " . $fullSql . "<br>";
-                echo "用户ID: " . $userId . "<br>";
-                echo "=====================<br>";
-
-
-                $renewalCommission = \App\Models\Order::where([
-                    'invite_user_id' => $userId,
-                    'type' => 2,
-                    'status' => 3,
-                    'commission_status' => 2,
-                    'period' => $periodInfo['period']
-                ])->sum('commission_balance');
+                ->where('status','>=', 3)
+                ->where('commission_status', '>=', 2) // 也修改为>=2，保持一致性
+                ->where('period', $periodInfo['period'])
+                ->sum('commission_balance');
 
                 $result[$key] = [
                     'period_name' => $periodInfo['name'],
