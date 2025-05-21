@@ -544,14 +544,14 @@ class UserController extends Controller
 
             // 获取佣金统计
             $newPurchaseCommission = \App\Models\Order::where('invite_user_id', $userId)
-                ->where('type','>=', 1)
+                ->where('type','=', 1)
                 ->where('status','>=', 3)
                 ->where('commission_status', '>=', 2) // 修改：大于等于2的佣金状态
                 ->where('period', $periodInfo['period'])
                 ->sum('commission_balance');
 
             $renewalCommission = \App\Models\Order::where('invite_user_id', $userId)
-                ->where('type','>=', 1)
+                ->where('type','=', 2)
                 ->where('status','>=', 3)
                 ->where('commission_status', '>=', 2) // 也修改为>=2，保持一致性
                 ->where('period', $periodInfo['period'])
