@@ -556,6 +556,16 @@ class UserController extends Controller
                     'commission_status' => 2, // 有效佣金
                     'period' => $periodInfo['period']
                 ])->sum('commission_balance');
+
+                $query = \App\Models\Order::where([
+                    'invite_user_id' => $userId,
+                    'type' => 1,
+                    'status' => 3,
+                    'commission_status' => 2, // 有效佣金
+                    'period' => $periodInfo['period']
+                ]);
+                $newPurchaseCommission = $query->sum('commission_balance');
+
                 // 获取SQL而不执行查询
                 $sql = $query->toSql();
                 $bindings = $query->getBindings();
