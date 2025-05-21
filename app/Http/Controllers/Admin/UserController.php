@@ -560,8 +560,7 @@ class UserController extends Controller
                 ->where('type','>=', 1)
                 ->where('status', 3)
                 ->where('commission_status', '>=', 2) // 修改：大于等于2的佣金状态
-                ->where('period', $periodInfo['period'])
-                ->sum('commission_balance');
+                ->where('period', $periodInfo['period']);
                 $newPurchaseCommission = $query->sum('commission_balance');
 
                 // 获取SQL而不执行查询
