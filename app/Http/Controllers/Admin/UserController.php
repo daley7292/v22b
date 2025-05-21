@@ -549,21 +549,19 @@ class UserController extends Controller
                 ])->sum('total_amount');
 
                 // 获取佣金统计
-                $newPurchaseCommission = \App\Models\Order::where([
-                    'invite_user_id' => $userId,
-                    'type' => 1,
-                    'status' => 3,
-                    'commission_status' => 2, // 有效佣金
-                    'period' => $periodInfo['period']
-                ])->sum('commission_balance');
+            $newPurchaseCommission = \App\Models\Order::where('invite_user_id', $userId)
+                ->where('type','>=', 1)
+                ->where('status', 3)
+                ->where('commission_status', '>=', 2) // 修改：大于等于2的佣金状态
+                ->where('period', $periodInfo['period'])
+                ->sum('commission_balance');
 
-                $query = \App\Models\Order::where([
-                    'invite_user_id' => $userId,
-                    'type' => 1,
-                    'status' => 3,
-                    'commission_status' => 2, // 有效佣金
-                    'period' => $periodInfo['period']
-                ]);
+                $query = \App\Models\Order::where('invite_user_id', $userId)
+                ->where('type','>=', 1)
+                ->where('status', 3)
+                ->where('commission_status', '>=', 2) // 修改：大于等于2的佣金状态
+                ->where('period', $periodInfo['period'])
+                ->sum('commission_balance');
                 $newPurchaseCommission = $query->sum('commission_balance');
 
                 // 获取SQL而不执行查询
