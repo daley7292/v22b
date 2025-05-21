@@ -557,6 +557,29 @@ class UserController extends Controller
                 ->where('period', $periodInfo['period'])
                 ->sum('commission_balance');
 
+
+            // 查询升级订单数量
+            $upgradeCount = \App\Models\Order::where('invite_user_id', $userId)
+                ->where('type', 3) // 升级
+                ->where('status', 3) // 已完成
+                ->where('period', $periodInfo['period'])
+                ->count();
+
+            // 获取升级订单金额统计
+            $upgradeAmount = \App\Models\Order::where('invite_user_id', $userId)
+                ->where('type', 3)
+                ->where('status', 3)
+                ->where('period', $periodInfo['period'])
+                ->sum('total_amount');
+
+            // 获取升级佣金统计
+            $upgradeCommission = \App\Models\Order::where('invite_user_id', $userId)
+                ->where('type', 3)
+                ->where('status', '>=', 3)
+                ->where('commission_status', '>=', 2) 
+                ->where('period', $periodInfo['period'])
+                ->sum('commission_balance');
+
                 $result[$key] = [
                     'period_name' => $periodInfo['name'],
                     'new_purchase' => [
@@ -564,15 +587,20 @@ class UserController extends Controller
                         'amount' => $newPurchaseAmount / 100, // 转换为元
                         'commission' => $newPurchaseCommission / 100
                     ],
+                        'upgrade' => [ // 新增升级数据
+                        'count' => $upgradeCount,
+                        'amount' => $upgradeAmount / 100,
+                        'commission' => $upgradeCommission / 100
+                    ],
                     'renewal' => [
                         'count' => $renewalCount,
                         'amount' => $renewalAmount / 100,
                         'commission' => $renewalCommission / 100
                     ],
                     'total' => [
-                        'count' => $newPurchaseCount + $renewalCount,
-                        'amount' => ($newPurchaseAmount + $renewalAmount) / 100,
-                        'commission' => ($newPurchaseCommission + $renewalCommission) / 100
+                         'count' => $newPurchaseCount + $renewalCount + $upgradeCount,
+                        'amount' => ($newPurchaseAmount + $renewalAmount + $upgradeAmount) / 100,
+                        'commission' => ($newPurchaseCommission + $renewalCommission + $upgradeCommission) / 100
                     ]
                 ];
             }
@@ -588,7 +616,12 @@ class UserController extends Controller
                     'count' => 0,
                     'amount' => 0,
                     'commission' => 0
-                ]
+                ],
+                'upgrade' => [
+                    'count' => 0,
+                    'amount' => 0,
+                    'commission' => 0
+                ]   
             ];
 
             // 正确计算总计
@@ -600,6 +633,10 @@ class UserController extends Controller
                 $totals['renewal']['count'] += $period['renewal']['count'];
                 $totals['renewal']['amount'] += $period['renewal']['amount'];
                 $totals['renewal']['commission'] += $period['renewal']['commission'];
+
+                $totals['upgrade']['count'] += $period['upgrade']['count'];
+                $totals['upgrade']['amount'] += $period['upgrade']['amount'];
+                $totals['upgrade']['commission'] += $period['upgrade']['commission'];
             }
 
             // 获取用户基本信息
