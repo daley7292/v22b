@@ -498,15 +498,15 @@ class UserController extends Controller
         
         // 定义时间周期映射
         $periods = [
-            'month' => ['period' => 'month', 'name' => '月付'],
-            'quarter' => ['period' => 'quarter', 'name' => '季付'],
-            'half_year' => ['period' => 'half_year', 'name' => '半年付'],
-            'year' => ['period' => 'year', 'name' => '年付'],
-            'two_year' => ['period' => 'two_year', 'name' => '两年付'],
-            'three_year' => ['period' => 'three_year', 'name' => '三年付'],
-            'onetime' => ['period' => 'onetime', 'name' => '一次性'],
+            'month' => ['period' => 'month_price', 'name' => '月付'],
+            'quarter' => ['period' => 'quarter_price', 'name' => '季付'],
+            'half_year' => ['period' => 'half_year_price', 'name' => '半年付'],
+            'year' => ['period' => 'year_price', 'name' => '年付'],
+            'two_year' => ['period' => 'two_year_price', 'name' => '两年付'],
+            'three_year' => ['period' => 'three_year_price', 'name' => '三年付'],
+            'onetime' => ['period' => 'onetime_price', 'name' => '一次性'],
             'try_out' => ['period' => 'try_out', 'name' => '试用'],
-            'reset' => ['period' => 'reset', 'name' => '重置流量'],
+            'reset' => ['period' => 'reset_price', 'name' => '重置流量'],
         ];
 
         try {
