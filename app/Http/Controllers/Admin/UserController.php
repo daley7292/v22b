@@ -514,6 +514,9 @@ class UserController extends Controller
             
             // 遍历每个时间周期
             foreach ($periods as $key => $periodInfo) {
+                // 添加在 foreach 循环前
+                \DB::enableQueryLog();
+
                 // 查询新购订单数量
                 $newPurchaseCount = \App\Models\Order::where([
                     'invite_user_id' => $userId,
@@ -553,6 +556,19 @@ class UserController extends Controller
                     'commission_status' => 2, // 有效佣金
                     'period' => $periodInfo['period']
                 ])->sum('commission_balance');
+                // 获取SQL而不执行查询
+                $sql = $query->toSql();
+                $bindings = $query->getBindings();
+                // 替换占位符以获得完整SQL
+                $fullSql = vsprintf(str_replace('?', "'%s'", $sql), $bindings);
+
+                // 打印SQL和期望值
+                echo "====== SQL调试 ======<br>";
+                echo "周期: " . $key . " (" . $periodInfo['period'] . ")<br>";
+                echo "SQL: " . $fullSql . "<br>";
+                echo "用户ID: " . $userId . "<br>";
+                echo "=====================<br>";
+
 
                 $renewalCommission = \App\Models\Order::where([
                     'invite_user_id' => $userId,
