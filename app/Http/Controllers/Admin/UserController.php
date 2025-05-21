@@ -552,7 +552,7 @@ class UserController extends Controller
                     'status' => 3,
                     'commission_status' => 2, // 有效佣金
                     'period' => $periodInfo['period']
-                ])->sum('actual_commission_balance');
+                ])->sum('commission_balance');
 
                 $renewalCommission = \App\Models\Order::where([
                     'invite_user_id' => $userId,
@@ -560,7 +560,7 @@ class UserController extends Controller
                     'status' => 3,
                     'commission_status' => 2,
                     'period' => $periodInfo['period']
-                ])->sum('actual_commission_balance');
+                ])->sum('commission_balance');
 
                 $result[$key] = [
                     'period_name' => $periodInfo['name'],
