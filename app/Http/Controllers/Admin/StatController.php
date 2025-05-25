@@ -825,6 +825,7 @@ public function getFinances(Request $request)
     $momGrowthRate = $this->calculateGrowthRate($currentTotal, $previousTotal);
     $yoyGrowthRate = $this->calculateGrowthRate($currentTotal, $lastYearTotal);
 
+    // 修改返回上一期的日期显示
     return [
         'data' => [
             'current_period' => [
@@ -833,8 +834,8 @@ public function getFinances(Request $request)
                 'total' => $currentTotal
             ],
             'previous_period' => [
-                'start_time' => date('Y-m-d', $startTime - ($endTime - $startTime)),
-                'end_time' => date('Y-m-d', $endTime - ($endTime - $startTime)),
+                'start_time' => date('Y-m-d', $previousData->min('date') ? strtotime($previousData->min('date')) : $startTime - $periodLength),
+                'end_time' => date('Y-m-d', $previousData->max('date') ? strtotime($previousData->max('date')) : $startTime - 86400), // 减一天
                 'total' => $previousTotal
             ],
             'last_year_period' => [
